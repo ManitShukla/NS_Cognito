@@ -106,6 +106,40 @@ export class PlumwareDownError extends AppError {
 }
 
 /**
+ * Thrown when imsnsit.org times out past the bounded 8000ms–9000ms threshold.
+ * Prevents Vercel serverless platform hard 504 timeouts and returns clean monospaced JSON.
+ */
+export class UpstreamTimeoutError extends AppError {
+  readonly statusCode = 504; // Gateway Timeout
+  readonly code = 'UPSTREAM_TIMEOUT';
+
+  constructor(
+    message = 'University portal took too long to respond. Please retry.',
+    details?: Record<string, unknown>
+  ) {
+    super(message, details);
+  }
+
+  override toJSON(): {
+    status: string;
+    code: string;
+    message: string;
+    details?: Record<string, unknown>;
+    success: boolean;
+    error: string;
+  } {
+    return {
+      status: 'error',
+      code: this.code,
+      message: this.message,
+      success: false,
+      error: this.code,
+      ...(this.details ? { details: this.details } : {}),
+    };
+  }
+}
+
+/**
  * Thrown when client request payload fails Zod validation.
  */
 export class RequestValidationError extends AppError {

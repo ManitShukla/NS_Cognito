@@ -31,14 +31,68 @@ export interface AppContext {
 export function createApp(): AppContext {
   const app = express();
 
-  // Security headers & CORS
+  // Security headers & strict CORS
   app.use(helmet());
+
+  const allowedOrigins = [
+    'https://nscognito.vercel.app',
+    process.env.CORS_ORIGIN,
+    process.env.APP_URL,
+    ...(process.env.NODE_ENV !== 'production'
+      ? ['http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:3000', 'http://127.0.0.1:5173']
+      : []),
+  ].filter(Boolean) as string[];
+
   app.use(
     cors({
-      origin: true,
+      origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.includes(origin)) return callback(null, true);
+        if (Boolean(process.env.VERCEL) && origin.endsWith('.vercel.app')) {
+          return callback(null, true);
+        }
+        if (process.env.NODE_ENV !== 'production' && (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
+          return callback(null, true);
+        }
+        return callback(new Error(`CORS policy violation: origin ${origin} is not permitted.`));
+      },
       credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'x-session-token', 'Cookie', 'X-Requested-With'],
+      exposedHeaders: ['Set-Cookie'],
     })
   );
+
+  // Cookie Security Hardening: enforce Secure, SameSite=Lax, HttpOnly
+  const isProd = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
+  app.use((_req, res, next) => {
+    const originalCookie = res.cookie.bind(res);
+    res.cookie = (name: string, val: unknown, options: express.CookieOptions = {}) => {
+      const hardenedOptions: express.CookieOptions = {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: isProd,
+        ...options,
+      };
+      return originalCookie(name, val, hardenedOptions);
+    };
+    next();
+  });
+
+  // Serverless URL normalization middleware (handles edge rewrites)
+  app.use((req, _res, next) => {
+    if (!req.url.startsWith('/api') && !req.url.startsWith('/health')) {
+      const isApiRoute =
+        req.url.startsWith('/v1') ||
+        req.url.startsWith('/auth') ||
+        req.url.startsWith('/student') ||
+        req.url.startsWith('/timetable');
+      if (isApiRoute) {
+        req.url = `/api${req.url.startsWith('/v1') ? '' : '/v1'}${req.url}`;
+      }
+    }
+    next();
+  });
 
   // Body parsing
   app.use(express.json({ limit: '1mb' }));

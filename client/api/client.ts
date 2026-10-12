@@ -25,11 +25,11 @@ export class ApiError extends Error {
 }
 
 async function handleResponse<T>(response: Response): Promise<T> {
-  const json: ApiResponse<T> = await response.json();
+  const json: ApiResponse<T> & { success?: boolean; error?: string } = await response.json();
 
-  if (!response.ok || json.status === 'error') {
+  if (!response.ok || json.status === 'error' || json.success === false) {
     throw new ApiError(
-      json.code || `HTTP_${response.status}`,
+      json.code || json.error || `HTTP_${response.status}`,
       json.message || 'An unexpected telemetry gateway error occurred.',
       json.details
     );

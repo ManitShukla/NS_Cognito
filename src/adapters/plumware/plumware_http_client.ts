@@ -3,7 +3,7 @@ import { wrapper } from 'axios-cookiejar-support';
 import type { CookieJar } from 'tough-cookie';
 import { env } from '../../config/env.js';
 import { logger } from '../../utils/logger.js';
-import { PlumwareDownError } from '../../utils/errors.js';
+import { PlumwareDownError, UpstreamTimeoutError } from '../../utils/errors.js';
 import { upstreamTrafficGate } from './upstream_traffic_gate.js';
 
 export interface HttpClientOptions {
@@ -72,9 +72,26 @@ export class PlumwareHttpClient {
         return await upstreamTrafficGate.execute(operationName, fn);
       } catch (err: unknown) {
         attempt++;
+        const isTimeout =
+          isAxiosError(err) &&
+          (err.code === 'ECONNABORTED' ||
+            err.code === 'ETIMEDOUT' ||
+            (err.message && err.message.toLowerCase().includes('timeout')));
+
+        if (isTimeout) {
+          logger.warn(
+            'HTTP',
+            `Upstream timeout reached during "${operationName}" (${this.timeoutMs}ms). Aborting cleanly to avoid platform 504.`
+          );
+          throw new UpstreamTimeoutError(
+            'University portal took too long to respond. Please retry.',
+            { operation: operationName, attempts: attempt, timeoutMs: this.timeoutMs }
+          );
+        }
+
         const isNetworkOrTimeout =
           isAxiosError(err) &&
-          (!err.response || err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT' || err.code === 'ECONNRESET');
+          (!err.response || err.code === 'ECONNRESET' || err.code === 'ECONNREFUSED');
 
         if (attempt > this.maxRetries || !isNetworkOrTimeout) {
           logger.error(
@@ -82,7 +99,7 @@ export class PlumwareHttpClient {
             `Failed operation "${operationName}" after ${attempt} attempt(s): ${err instanceof Error ? err.message : String(err)}`
           );
           throw new PlumwareDownError(
-            `Plumware gateway error during "${operationName}": ${err instanceof Error ? err.message : 'Timeout'}`,
+            `Plumware gateway error during "${operationName}": ${err instanceof Error ? err.message : 'Network failure'}`,
             { operation: operationName, attempts: attempt }
           );
         }
