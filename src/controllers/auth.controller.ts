@@ -150,7 +150,12 @@ export class AuthController {
     res.status(200).json({
       status: 'operational',
       engine: 'NS Cognito Core Proxy',
-      version: '1.0.0',
+      version: '1.0.1',
+      build: {
+        commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || '21f804e',
+        environment: process.env.VERCEL_ENV || process.env.NODE_ENV || 'local',
+        timestamp: new Date().toISOString(),
+      },
       timestamp: new Date().toISOString(),
       uptimeSeconds: Math.floor(process.uptime()),
     });

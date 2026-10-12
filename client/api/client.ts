@@ -10,6 +10,7 @@ import type {
   ForecastAction,
   DayOfWeek,
 } from '../types/api';
+import { telemetryTally } from './telemetryTally';
 
 const API_BASE = '/api/v1';
 
@@ -62,8 +63,16 @@ export const apiClient = {
    * Initializes a fresh Plumware session and retrieves the bound CAPTCHA.
    */
   async initSession(): Promise<SessionInitData> {
-    const res = await fetch(`${API_BASE}/auth/session`);
-    return handleResponse<SessionInitData>(res);
+    try {
+      const res = await fetch(`${API_BASE}/auth/session`);
+      const data = await handleResponse<SessionInitData>(res);
+      telemetryTally.recordHandshake(true, `Primed session ${data.sessionToken.slice(0, 8)}...`);
+      telemetryTally.recordCaptcha(true, `CAPTCHA relay acquired (${data.academicYear})`);
+      return data;
+    } catch (err: any) {
+      telemetryTally.recordHandshake(false, err?.message || 'Handshake failed');
+      throw err;
+    }
   },
 
   /**
@@ -75,24 +84,38 @@ export const apiClient = {
     password: string;
     captchaText: string;
   }): Promise<LoginSuccessData> {
-    const res = await fetch(`${API_BASE}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    return handleResponse<LoginSuccessData>(res);
+    try {
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await handleResponse<LoginSuccessData>(res);
+      telemetryTally.recordLogin(true, `Authenticated Roll: ${data.rollNo}`);
+      return data;
+    } catch (err: any) {
+      telemetryTally.recordLogin(false, err?.message || 'Authentication rejected');
+      throw err;
+    }
   },
 
   /**
    * Refreshes the CAPTCHA image for an active session.
    */
   async refreshCaptcha(sessionToken: string): Promise<SessionInitData> {
-    const res = await fetch(`${API_BASE}/auth/refresh-captcha`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionToken }),
-    });
-    return handleResponse<SessionInitData>(res);
+    try {
+      const res = await fetch(`${API_BASE}/auth/refresh-captcha`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionToken }),
+      });
+      const data = await handleResponse<SessionInitData>(res);
+      telemetryTally.recordCaptcha(true, 'CAPTCHA challenge refreshed');
+      return data;
+    } catch (err: any) {
+      telemetryTally.recordCaptcha(false, err?.message || 'Refresh failed');
+      throw err;
+    }
   },
 
   /**

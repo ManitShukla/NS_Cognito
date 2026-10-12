@@ -13,6 +13,7 @@ import type {
   LoginSuccessData,
 } from './types/api';
 import { RefreshCw, Zap } from 'lucide-react';
+import { BuildTallySidebar } from './components/BuildTallySidebar';
 
 export const App: React.FC = () => {
   const [sessionToken, setSessionToken] = useState<string | null>(() => {
@@ -273,6 +274,9 @@ export const App: React.FC = () => {
           </div>
         </div>
       </footer>
+
+      {/* Running Build & Telemetry Tally on the side */}
+      <BuildTallySidebar />
     </div>
   );
 };

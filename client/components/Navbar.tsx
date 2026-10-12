@@ -33,8 +33,11 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="font-sans font-bold text-lg tracking-tight uppercase">
                 NS Cognito
               </span>
-              <span className="font-mono text-[10px] px-1.5 py-0.5 bg-co-night border border-co-dark-rule text-co-dark-copy uppercase">
-                v1.0.0
+              <span
+                className="font-mono text-[10px] px-1.5 py-0.5 bg-co-night border border-co-dark-rule text-co-red uppercase font-bold"
+                title={`Build #${typeof __APP_BUILD_INFO__ !== 'undefined' ? __APP_BUILD_INFO__.buildNumber : '1'} (rev:${typeof __APP_BUILD_INFO__ !== 'undefined' ? __APP_BUILD_INFO__.commit : 'local'})`}
+              >
+                v{typeof __APP_BUILD_INFO__ !== 'undefined' ? `${__APP_BUILD_INFO__.version}-#${__APP_BUILD_INFO__.buildNumber}` : '1.0.1'}
               </span>
             </div>
             <div className="font-mono text-[10px] tracking-wider text-co-muted uppercase">
