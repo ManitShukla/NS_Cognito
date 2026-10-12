@@ -42,6 +42,11 @@ describe('Vercel Serverless Deployment & Runtime Adaptation Test Suite', () => {
       expect(pkg.engines.node).toContain('20');
     });
 
+    it('verifies vercel.json enforces Mumbai region (bom1) to bypass geo-blocking', () => {
+      const parsed = JSON.parse(fs.readFileSync(vercelConfigPath, 'utf-8'));
+      expect(parsed.regions).toEqual(['bom1']);
+    });
+
     it('verifies strict production security and caching headers', () => {
       const parsed = JSON.parse(fs.readFileSync(vercelConfigPath, 'utf-8'));
       const headersList = parsed.headers || [];
@@ -271,6 +276,42 @@ describe('Vercel Serverless Deployment & Runtime Adaptation Test Suite', () => {
       const pingResult = await redisStore.ping();
       expect(pingResult).toBe(true);
     });
+
+    it('seamlessly degrades to in-memory fallback cache when Redis encounters network failures', async () => {
+      const failingRedisClient: any = {
+        set: vi.fn().mockRejectedValue(new Error('ECONNREFUSED 127.0.0.1:6379')),
+        get: vi.fn().mockRejectedValue(new Error('Connection is closed')),
+        del: vi.fn().mockRejectedValue(new Error('Connection is closed')),
+        ttl: vi.fn().mockRejectedValue(new Error('Connection is closed')),
+        ping: vi.fn().mockRejectedValue(new Error('Connection is closed')),
+        quit: vi.fn().mockResolvedValue('OK'),
+        disconnect: vi.fn(),
+        on: vi.fn(),
+      };
+
+      const resilientStore = new RedisSessionStore({
+        client: failingRedisClient,
+        keyPrefix: 'test:fallback:',
+        defaultTtlSeconds: 180,
+      });
+
+      const sessionState: SessionState = {
+        sessionToken: 'fallback-resilience-token',
+        cookieJar: new CookieJar(),
+        fy: '2026-27',
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 180000,
+        isAuthenticated: false,
+      };
+
+      // Set should NOT throw; should degrade to memory fallback store
+      await expect(resilientStore.set('fallback-resilience-token', sessionState, 180)).resolves.not.toThrow();
+
+      // Get should return the state from the memory fallback store
+      const retrieved = await resilientStore.get('fallback-resilience-token');
+      expect(retrieved).not.toBeNull();
+      expect(retrieved?.sessionToken).toBe('fallback-resilience-token');
+    });
   });
 
   // ===========================================================================
@@ -340,6 +381,80 @@ describe('Vercel Serverless Deployment & Runtime Adaptation Test Suite', () => {
 
       const jar = new CookieJar();
       await expect(client.fetchLoginPage(jar)).rejects.toThrow(UpstreamTimeoutError);
+    });
+  });
+
+  // ===========================================================================
+  // Dimension 6: TLS Hardening & Diagnostic Handshake Error Telemetry
+  // ===========================================================================
+  describe('Dimension 6: TLS Hardening & Diagnostic Error Telemetry', () => {
+    it('PlumwareHttpClient initializes https.Agent with rejectUnauthorized: false and legacy ciphers', () => {
+      const client = new PlumwareHttpClient();
+      const jar = new CookieJar();
+      const sessionClient = client.createSessionClient(jar);
+      const agent = (sessionClient.defaults as any).httpsAgent;
+      expect(agent).toBeDefined();
+      expect(agent.options.rejectUnauthorized).toBe(false);
+      expect(agent.options.ciphers).toContain('DEFAULT:@SECLEVEL=1');
+      expect(agent.options.keepAlive).toBe(true);
+    });
+
+    it('returns structured diagnostic telemetry when handshake encounters TLS error', async () => {
+      const mockSessionEngine: any = {
+        initializeSession: vi.fn().mockRejectedValue(
+          Object.assign(new Error('certificate has expired'), { code: 'CERT_HAS_EXPIRED' })
+        ),
+      };
+      const { AuthController } = await import('../src/controllers/auth.controller.js');
+      const authController = new AuthController(mockSessionEngine);
+
+      let responseStatus = 0;
+      let responseBody: any = null;
+      const res: any = {
+        status: (s: number) => {
+          responseStatus = s;
+          return {
+            json: (b: any) => {
+              responseBody = b;
+            },
+          };
+        },
+      };
+      const next: any = vi.fn();
+
+      await authController.initSession({} as any, res, next);
+      expect(responseStatus).toBe(502);
+      expect(responseBody.code).toBe('TLS_HANDSHAKE_FAILED');
+      expect(responseBody.message).toContain('CERT_HAS_EXPIRED');
+    });
+
+    it('returns structured diagnostic telemetry when handshake encounters firewall/network error', async () => {
+      const mockSessionEngine: any = {
+        initializeSession: vi.fn().mockRejectedValue(
+          Object.assign(new Error('connect ECONNREFUSED 14.139.227.16'), { code: 'ECONNREFUSED' })
+        ),
+      };
+      const { AuthController } = await import('../src/controllers/auth.controller.js');
+      const authController = new AuthController(mockSessionEngine);
+
+      let responseStatus = 0;
+      let responseBody: any = null;
+      const res: any = {
+        status: (s: number) => {
+          responseStatus = s;
+          return {
+            json: (b: any) => {
+              responseBody = b;
+            },
+          };
+        },
+      };
+      const next: any = vi.fn();
+
+      await authController.initSession({} as any, res, next);
+      expect(responseStatus).toBe(503);
+      expect(responseBody.code).toBe('UPSTREAM_FIREWALL_OR_UNREACHABLE');
+      expect(responseBody.message).toContain('ECONNREFUSED');
     });
   });
 });

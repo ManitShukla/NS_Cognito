@@ -4,6 +4,7 @@
   "framework": "vite",
   "buildCommand": "npm run build",
   "outputDirectory": "dist/client",
+  "regions": ["bom1"],
   "functions": {
     "api/index.ts": {
       "memory": 1024,
@@ -65,7 +66,7 @@
       "destination": "/api/index.ts"
     },
     {
-      "source": "/((?!api/|health/).*)",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]

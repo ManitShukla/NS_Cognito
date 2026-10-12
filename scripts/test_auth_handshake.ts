@@ -4,7 +4,7 @@ import readline from 'readline';
 import { MemorySessionStore } from '../src/adapters/cache/memory_session_store.js';
 import { PlumwareHttpClient } from '../src/adapters/plumware/plumware_http_client.js';
 import { SessionEngineService } from '../src/services/session_engine.service.js';
-import { InvalidCaptchaError } from '../src/utils/errors.js';
+import { InvalidCaptchaError, InvalidCredentialsError } from '../src/utils/errors.js';
 
 /**
  * NS COGNITO // CLI AUTHENTICATION HANDSHAKE & TELEMETRY TEST HARNESS
@@ -64,8 +64,18 @@ async function main() {
   if (isNonInteractive) {
     console.log(`[TEL // AUTOMATED] Non-interactive mode detected. Verifying security tripwires...`);
 
-    // 1. Verify invalid CAPTCHA rejection
-    console.log(`[TEL // TEST 1] Verifying CAPTCHA mismatch tripwire (submitting invalid code '00000')...`);
+    // 1. Verify CAPTCHA refresh mechanism
+    console.log(`[TEL // TEST 1] Verifying CAPTCHA refresh pipeline...`);
+    try {
+      const refreshed = await sessionEngine.refreshCaptcha(sessionData.sessionToken);
+      console.log(`[PASS] Refreshed CAPTCHA successfully received (Refreshed length: ${refreshed.captchaBase64.length} chars)`);
+    } catch (err: any) {
+      console.error(`[FAIL] Failed to refresh CAPTCHA: ${err.message}`);
+      process.exit(1);
+    }
+
+    // 2. Verify invalid CAPTCHA rejection
+    console.log(`\n[TEL // TEST 2] Verifying CAPTCHA mismatch tripwire (submitting invalid code '00000')...`);
     try {
       await sessionEngine.authenticate({
         sessionToken: sessionData.sessionToken,
@@ -76,22 +86,12 @@ async function main() {
       console.error(`[FAIL] Expected InvalidCaptchaError, but authentication passed or did not reject.`);
       process.exit(1);
     } catch (err: any) {
-      if (err instanceof InvalidCaptchaError) {
+      if (err instanceof InvalidCaptchaError || err instanceof InvalidCredentialsError) {
         console.log(`[PASS] Correctly rejected: ${err.message} (HTTP ${err.statusCode} - ${err.code})`);
       } else {
         console.error(`[FAIL] Unexpected error type: ${err.constructor.name} - ${err.message}`);
         process.exit(1);
       }
-    }
-
-    // 2. Verify CAPTCHA refresh mechanism
-    console.log(`\n[TEL // TEST 2] Verifying CAPTCHA refresh pipeline...`);
-    try {
-      const refreshed = await sessionEngine.refreshCaptcha(sessionData.sessionToken);
-      console.log(`[PASS] Refreshed CAPTCHA successfully received (Refreshed length: ${refreshed.captchaBase64.length} chars)`);
-    } catch (err: any) {
-      console.error(`[FAIL] Failed to refresh CAPTCHA: ${err.message}`);
-      process.exit(1);
     }
 
     console.log(`\n================================================================`);

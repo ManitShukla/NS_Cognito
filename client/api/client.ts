@@ -25,7 +25,15 @@ export class ApiError extends Error {
 }
 
 async function handleResponse<T>(response: Response): Promise<T> {
-  const json: ApiResponse<T> & { success?: boolean; error?: string } = await response.json();
+  let json: (ApiResponse<T> & { success?: boolean; error?: string }) | null = null;
+  try {
+    json = await response.json();
+  } catch {
+    throw new ApiError(
+      `HTTP_${response.status}`,
+      `Gateway error (HTTP ${response.status} ${response.statusText || 'Error'}). Upstream gateway returned non-JSON payload.`
+    );
+  }
 
   if (!response.ok || json.status === 'error' || json.success === false) {
     throw new ApiError(

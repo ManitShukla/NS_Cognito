@@ -31,9 +31,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onCancel }
       if (err instanceof ApiError) {
         setErrorMessage({ code: err.code, message: err.message });
       } else {
+        const msg = err instanceof Error ? err.message : 'Unable to establish secure handshake with Plumware proxy gateway.';
         setErrorMessage({
           code: 'HANDSHAKE_ERROR',
-          message: 'Unable to establish secure handshake with Plumware proxy gateway.',
+          message: msg,
         });
       }
     } finally {

@@ -16,6 +16,7 @@ const envSchema = z.object({
   PLUMWARE_BASE_URL: z.string().url().default('https://www.imsnsit.org/imsnsit'),
   PLUMWARE_TIMEOUT_MS: z.coerce.number().int().positive().default(8500),
   PLUMWARE_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(1),
+  UPSTREAM_PROXY_URL: z.string().optional(),
 
   // Session lifecycle parameters (strict 180s / 3-minute ephemeral TTL)
   SESSION_TTL_SECONDS: z.coerce.number().int().min(30).max(1800).default(180),
