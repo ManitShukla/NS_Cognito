@@ -1,6 +1,5 @@
+import https from 'node:https';
 import axios, { type AxiosInstance, type AxiosResponse, isAxiosError } from 'axios';
-import { HttpsCookieAgent, createCookieAgent } from 'http-cookie-agent/http';
-import { HttpsProxyAgent } from 'https-proxy-agent';
 import type { CookieJar } from 'tough-cookie';
 import { env } from '../../config/env.js';
 import { logger } from '../../utils/logger.js';
@@ -17,7 +16,8 @@ export interface HttpClientOptions {
 /**
  * Resilient HTTP client adapter for Plumware ERP interaction.
  * Configured with strict browser impersonation headers, per-request cookie jar binding,
- * legacy institutional TLS cipher fallback, optional egress proxy hook, and exponential backoff.
+ * legacy institutional TLS cipher fallback, and exponential backoff.
+ * Uses native node:https Agent with cookie synchronization to eliminate third-party agent conflicts.
  */
 export class PlumwareHttpClient {
   private readonly baseURL: string;
@@ -51,43 +51,68 @@ export class PlumwareHttpClient {
     this.timeoutMs = options?.timeoutMs || env.PLUMWARE_TIMEOUT_MS;
     this.maxRetries = options?.maxRetries ?? env.PLUMWARE_MAX_RETRIES;
     this.proxyUrl = options?.proxyUrl || process.env.UPSTREAM_PROXY_URL || env.UPSTREAM_PROXY_URL;
-
     if (this.proxyUrl) {
       logger.info(
         'HTTP',
-        `Configured Plumware HTTP client with upstream egress proxy: ${this.proxyUrl.replace(/:\/\/.*@/, '://***@')}`
+        `Configured Plumware HTTP client with upstream proxy: ${this.proxyUrl.replace(/:\/\/.*@/, '://***@')}`
       );
     }
   }
 
   /**
    * Spawns an isolated Axios client instance bound to the caller's CookieJar
-   * using an HttpsCookieAgent configured with legacy institutional TLS support.
+   * using native Node.js https.Agent with legacy institutional TLS cipher support
+   * and automatic cookie synchronization interceptors.
    */
   createSessionClient(jar: CookieJar, customTimeoutMs?: number): AxiosInstance {
-    let httpsAgent: any;
+    const httpsAgent = new https.Agent(this.httpsAgentOptions);
 
-    if (this.proxyUrl) {
-      const HttpsProxyCookieAgent = createCookieAgent(HttpsProxyAgent);
-      httpsAgent = new HttpsProxyCookieAgent(this.proxyUrl, {
-        cookies: { jar: jar as any },
-        ...this.httpsAgentOptions,
-      });
-    } else {
-      httpsAgent = new HttpsCookieAgent({
-        cookies: { jar: jar as any },
-        ...this.httpsAgentOptions,
-      });
-    }
-
-    return axios.create({
+    const client = axios.create({
       baseURL: this.baseURL,
       timeout: customTimeoutMs || this.timeoutMs,
       headers: { ...PlumwareHttpClient.DEFAULT_HEADERS },
-      validateStatus: (status: number) => status >= 200 && status < 400, // Handle 3xx manually or gracefully
+      validateStatus: (status: number) => status >= 200 && status < 400,
       maxRedirects: 5,
       httpsAgent,
     });
+
+    // Request interceptor: synchronize outbound cookies from CookieJar
+    client.interceptors.request.use((config) => {
+      const targetUrl = config.url?.startsWith('http')
+        ? config.url
+        : `${config.baseURL || this.baseURL}/${(config.url || '').replace(/^\//, '')}`;
+      try {
+        const cookieStr = jar.getCookieStringSync(targetUrl);
+        if (cookieStr) {
+          config.headers = config.headers || {};
+          config.headers['Cookie'] = cookieStr;
+        }
+      } catch (e) {
+        logger.warn('HTTP', `Failed to retrieve cookies from jar for ${targetUrl}: ${e}`);
+      }
+      return config;
+    });
+
+    // Response interceptor: capture Set-Cookie headers into CookieJar
+    client.interceptors.response.use((response) => {
+      const setCookieHeaders = response.headers['set-cookie'];
+      if (setCookieHeaders) {
+        const targetUrl = response.config.url?.startsWith('http')
+          ? response.config.url
+          : `${response.config.baseURL || this.baseURL}/${(response.config.url || '').replace(/^\//, '')}`;
+        const headerList = Array.isArray(setCookieHeaders) ? setCookieHeaders : [setCookieHeaders];
+        for (const header of headerList) {
+          try {
+            jar.setCookieSync(header, targetUrl);
+          } catch (e) {
+            logger.warn('HTTP', `Failed to store cookie into jar: ${e}`);
+          }
+        }
+      }
+      return response;
+    });
+
+    return client;
   }
 
   /**

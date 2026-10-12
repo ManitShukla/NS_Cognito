@@ -392,9 +392,8 @@ var init_timetable = __esm({
 });
 
 // src/adapters/plumware/plumware_http_client.ts
+import https from "node:https";
 import axios2, { isAxiosError } from "axios";
-import { HttpsCookieAgent, createCookieAgent } from "http-cookie-agent/http";
-import { HttpsProxyAgent } from "https-proxy-agent";
 var PlumwareHttpClient;
 var init_plumware_http_client = __esm({
   "src/adapters/plumware/plumware_http_client.ts"() {
@@ -435,37 +434,54 @@ var init_plumware_http_client = __esm({
         if (this.proxyUrl) {
           logger.info(
             "HTTP",
-            `Configured Plumware HTTP client with upstream egress proxy: ${this.proxyUrl.replace(/:\/\/.*@/, "://***@")}`
+            `Configured Plumware HTTP client with upstream proxy: ${this.proxyUrl.replace(/:\/\/.*@/, "://***@")}`
           );
         }
       }
       /**
        * Spawns an isolated Axios client instance bound to the caller's CookieJar
-       * using an HttpsCookieAgent configured with legacy institutional TLS support.
+       * using native Node.js https.Agent with legacy institutional TLS cipher support
+       * and automatic cookie synchronization interceptors.
        */
       createSessionClient(jar, customTimeoutMs) {
-        let httpsAgent;
-        if (this.proxyUrl) {
-          const HttpsProxyCookieAgent = createCookieAgent(HttpsProxyAgent);
-          httpsAgent = new HttpsProxyCookieAgent(this.proxyUrl, {
-            cookies: { jar },
-            ...this.httpsAgentOptions
-          });
-        } else {
-          httpsAgent = new HttpsCookieAgent({
-            cookies: { jar },
-            ...this.httpsAgentOptions
-          });
-        }
-        return axios2.create({
+        const httpsAgent = new https.Agent(this.httpsAgentOptions);
+        const client = axios2.create({
           baseURL: this.baseURL,
           timeout: customTimeoutMs || this.timeoutMs,
           headers: { ..._PlumwareHttpClient.DEFAULT_HEADERS },
           validateStatus: (status) => status >= 200 && status < 400,
-          // Handle 3xx manually or gracefully
           maxRedirects: 5,
           httpsAgent
         });
+        client.interceptors.request.use((config) => {
+          const targetUrl = config.url?.startsWith("http") ? config.url : `${config.baseURL || this.baseURL}/${(config.url || "").replace(/^\//, "")}`;
+          try {
+            const cookieStr = jar.getCookieStringSync(targetUrl);
+            if (cookieStr) {
+              config.headers = config.headers || {};
+              config.headers["Cookie"] = cookieStr;
+            }
+          } catch (e) {
+            logger.warn("HTTP", `Failed to retrieve cookies from jar for ${targetUrl}: ${e}`);
+          }
+          return config;
+        });
+        client.interceptors.response.use((response) => {
+          const setCookieHeaders = response.headers["set-cookie"];
+          if (setCookieHeaders) {
+            const targetUrl = response.config.url?.startsWith("http") ? response.config.url : `${response.config.baseURL || this.baseURL}/${(response.config.url || "").replace(/^\//, "")}`;
+            const headerList = Array.isArray(setCookieHeaders) ? setCookieHeaders : [setCookieHeaders];
+            for (const header of headerList) {
+              try {
+                jar.setCookieSync(header, targetUrl);
+              } catch (e) {
+                logger.warn("HTTP", `Failed to store cookie into jar: ${e}`);
+              }
+            }
+          }
+          return response;
+        });
+        return client;
       }
       /**
        * Executes an HTTP request with exponential backoff and jitter on network dropouts.
