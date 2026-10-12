@@ -27,12 +27,25 @@ export class ApiError extends Error {
 
 async function handleResponse<T>(response: Response): Promise<T> {
   let json: (ApiResponse<T> & { success?: boolean; error?: string }) | null = null;
+  const rawClone = response.clone();
   try {
     json = await response.json();
   } catch {
+    let rawBody = '';
+    try {
+      rawBody = await rawClone.text();
+    } catch {}
+
     throw new ApiError(
       `HTTP_${response.status}`,
-      `Gateway error (HTTP ${response.status} ${response.statusText || 'Error'}). Upstream gateway returned non-JSON payload.`
+      `Gateway error (HTTP ${response.status} ${response.statusText || 'Error'}). Upstream gateway returned non-JSON payload.`,
+      {
+        rawBody,
+        status: response.status,
+        statusText: response.statusText,
+        contentType: response.headers.get('content-type') || 'unknown',
+        url: response.url,
+      }
     );
   }
 

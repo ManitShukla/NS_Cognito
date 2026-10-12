@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiClient, ApiError } from '../api/client';
-import { RefreshCw, Lock, User, KeyRound, AlertTriangle, ArrowRight, ShieldCheck, Clock } from 'lucide-react';
+import { RefreshCw, Lock, User, KeyRound, AlertTriangle, ArrowRight, ShieldCheck, Clock, Download } from 'lucide-react';
 import type { SessionInitData, LoginSuccessData } from '../types/api';
 
 interface LoginPageProps {
@@ -16,7 +16,21 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onCancel }
   const [ttlSeconds, setTtlSeconds] = useState(180);
   const [isLoadingSession, setIsLoadingSession] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<{ code: string; message: string } | null>(null);
+  const [errorMessage, setErrorMessage] = useState<{ code: string; message: string; rawBody?: string } | null>(null);
+  const [showRawPayload, setShowRawPayload] = useState<boolean>(false);
+
+  const handleDownloadRawPayload = () => {
+    if (!errorMessage?.rawBody) return;
+    const blob = new Blob([errorMessage.rawBody], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `gateway_payload_${Date.now()}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   // Initialize session and fetch CAPTCHA
   const initHandshake = useCallback(async () => {
@@ -29,7 +43,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onCancel }
       setCaptchaText('');
     } catch (err) {
       if (err instanceof ApiError) {
-        setErrorMessage({ code: err.code, message: err.message });
+        setErrorMessage({
+          code: err.code,
+          message: err.message,
+          rawBody: typeof err.details?.rawBody === 'string' ? err.details.rawBody : undefined,
+        });
       } else {
         const msg = err instanceof Error ? err.message : 'Unable to establish secure handshake with Plumware proxy gateway.';
         setErrorMessage({
@@ -122,7 +140,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onCancel }
       onLoginSuccess(loginData);
     } catch (err) {
       if (err instanceof ApiError) {
-        setErrorMessage({ code: err.code, message: err.message });
+        setErrorMessage({
+          code: err.code,
+          message: err.message,
+          rawBody: typeof err.details?.rawBody === 'string' ? err.details.rawBody : undefined,
+        });
       } else {
         setErrorMessage({
           code: 'AUTH_GATEWAY_ERROR',
@@ -197,12 +219,40 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onCancel }
 
         {/* Error Notification Banner */}
         {errorMessage && (
-          <div className="mb-6 p-3 bg-red-950/40 border-l-2 border-co-red text-red-200 flex items-start space-x-3">
-            <AlertTriangle className="w-4 h-4 text-co-red shrink-0 mt-0.5" />
-            <div className="font-mono text-xs">
-              <span className="text-co-red font-bold tracking-wider mr-2">[{errorMessage.code}]</span>
-              <span>{errorMessage.message}</span>
+          <div className="mb-6 p-3 bg-red-950/40 border-l-2 border-co-red text-red-200 flex flex-col space-y-2">
+            <div className="flex items-start space-x-3">
+              <AlertTriangle className="w-4 h-4 text-co-red shrink-0 mt-0.5" />
+              <div className="font-mono text-xs flex-1">
+                <span className="text-co-red font-bold tracking-wider mr-2">[{errorMessage.code}]</span>
+                <span>{errorMessage.message}</span>
+              </div>
             </div>
+
+            {errorMessage.rawBody && (
+              <div className="pt-2 border-t border-red-900/60 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleDownloadRawPayload}
+                  className="px-2.5 py-1 bg-co-red hover:bg-red-700 text-white font-mono text-[10px] font-bold uppercase tracking-wider flex items-center space-x-1 cursor-pointer transition-colors"
+                >
+                  <Download className="w-3 h-3" />
+                  <span>DOWNLOAD RAW PAYLOAD (.TXT)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowRawPayload(!showRawPayload)}
+                  className="px-2 py-1 bg-co-night border border-co-dark-rule text-co-dark-copy hover:text-white font-mono text-[10px] uppercase cursor-pointer"
+                >
+                  {showRawPayload ? 'HIDE RAW PAYLOAD' : 'INSPECT RAW PAYLOAD'}
+                </button>
+              </div>
+            )}
+
+            {showRawPayload && errorMessage.rawBody && (
+              <pre className="mt-2 p-2 bg-black/90 border border-co-dark-rule text-[10px] font-mono text-zinc-300 max-h-40 overflow-y-auto whitespace-pre-wrap break-all select-all">
+                {errorMessage.rawBody}
+              </pre>
+            )}
           </div>
         )}
 
@@ -266,7 +316,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onCancel }
                   </div>
                 ) : sessionData?.captchaBase64 ? (
                   <img
-                    src={`data:image/jpeg;base64,${sessionData.captchaBase64}`}
+                    src={sessionData.captchaBase64.startsWith('data:') ? sessionData.captchaBase64 : `data:image/jpeg;base64,${sessionData.captchaBase64}`}
                     alt="Plumware CAPTCHA Challenge"
                     className="h-10 object-contain select-none filter contrast-125"
                   />

@@ -29,6 +29,7 @@ export interface TelemetryTallyState {
     engine: string | null;
     lastChecked: string | null;
     errorMessage: string | null;
+    rawResponseText: string | null;
   };
   events: TallyEvent[];
 }
@@ -61,6 +62,7 @@ class TelemetryTallyManager {
       engine: null,
       lastChecked: null,
       errorMessage: null,
+      rawResponseText: null,
     },
     events: [],
   };
@@ -145,6 +147,7 @@ class TelemetryTallyManager {
           engine: body.engine || 'NS Cognito Core Proxy',
           lastChecked: new Date().toLocaleTimeString(),
           errorMessage: null,
+          rawResponseText: JSON.stringify(body, null, 2),
         };
         this.addEvent('BACKEND_PING', 'SUCCESS', `HTTP ${res.status} [${latencyMs}ms]`);
       } else {
@@ -158,6 +161,7 @@ class TelemetryTallyManager {
           engine: null,
           lastChecked: new Date().toLocaleTimeString(),
           errorMessage: isHtml ? `HTTP ${res.status} (Returned non-JSON HTML)` : `HTTP ${res.status}`,
+          rawResponseText: text,
         };
         this.addEvent('BACKEND_PING', 'ERROR', `HTTP ${res.status} non-JSON response`);
       }
@@ -171,6 +175,7 @@ class TelemetryTallyManager {
         engine: null,
         lastChecked: new Date().toLocaleTimeString(),
         errorMessage: err instanceof Error ? err.message : 'Network unreachable',
+        rawResponseText: err instanceof Error ? err.stack || err.message : String(err),
       };
       this.addEvent('BACKEND_PING', 'ERROR', `Network failure: ${err instanceof Error ? err.message : 'offline'}`);
     }

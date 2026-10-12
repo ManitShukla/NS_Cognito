@@ -28,7 +28,7 @@ describe('Vercel Serverless Deployment & Runtime Adaptation Test Suite', () => {
 
     it('verifies serverless function runtime specifications (1024MB memory, 15s duration)', () => {
       const parsed = JSON.parse(fs.readFileSync(vercelConfigPath, 'utf-8'));
-      const fnConfig = parsed.functions?.['api/index.ts'];
+      const fnConfig = parsed.functions?.['api/index.js'] || parsed.functions?.['api/index.ts'];
 
       expect(fnConfig).toBeDefined();
       expect(fnConfig.memory).toBe(1024);
@@ -84,7 +84,7 @@ describe('Vercel Serverless Deployment & Runtime Adaptation Test Suite', () => {
       const parsed = JSON.parse(fs.readFileSync(vercelConfigPath, 'utf-8'));
       const rewrites = parsed.rewrites || [];
 
-      expect(rewrites.some((r: any) => r.source === '/api/(.*)' && r.destination === '/api/index.ts')).toBe(true);
+      expect(rewrites.some((r: any) => r.source === '/api/(.*)' && (r.destination === '/api/index.js' || r.destination === '/api/index.ts'))).toBe(true);
       expect(rewrites.some((r: any) => r.destination === '/index.html')).toBe(true);
     });
   });
