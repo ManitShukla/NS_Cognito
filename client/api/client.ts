@@ -35,6 +35,13 @@ async function handleResponse<T>(response: Response): Promise<T> {
     );
   }
 
+  if (!json) {
+    throw new ApiError(
+      `HTTP_${response.status}`,
+      `Gateway error (HTTP ${response.status} ${response.statusText || 'Error'}). Upstream gateway returned empty JSON payload.`
+    );
+  }
+
   if (!response.ok || json.status === 'error' || json.success === false) {
     throw new ApiError(
       json.code || json.error || `HTTP_${response.status}`,

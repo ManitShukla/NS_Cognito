@@ -11,6 +11,9 @@ export interface SessionState {
   /** Isolated tough-cookie CookieJar retaining upstream PHPSESSID and related cookies */
   cookieJar: CookieJar;
 
+  /** Hidden form token extracted from Plumware form (f) */
+  f?: string;
+
   /** Hidden encrypted financial year token extracted from Plumware form (enc_fy) */
   encFy?: string;
 

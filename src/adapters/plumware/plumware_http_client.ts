@@ -248,6 +248,8 @@ export class PlumwareHttpClient {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           Referer: `${this.baseURL}/plum5_fw_login.php`,
+          Origin: 'https://www.imsnsit.org',
+          'Upgrade-Insecure-Requests': '1',
         },
       })
     );

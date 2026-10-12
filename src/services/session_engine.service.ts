@@ -59,6 +59,7 @@ export class SessionEngineService {
     const sessionState: SessionState = {
       sessionToken,
       cookieJar,
+      f: parsedForm.f,
       encFy: parsedForm.encFy,
       fy: parsedForm.fy,
       comp: parsedForm.comp,
@@ -154,18 +155,22 @@ export class SessionEngineService {
       `Submitting authentication handshake for Roll: ${payload.rollNo} (Session: ${session.sessionToken.slice(0, 8)}...)`
     );
 
-    // 1. Build form URL-encoded payload matching Plumware specifications
+    // 1. Build form URL-encoded payload matching Plumware specifications with dual-key compatibility
     const formPayload: Record<string, string> = {
-      f: '',
       uid: payload.rollNo,
+      user_id: payload.rollNo,
       pwd: payload.password,
-      fy: session.fy,
-      enc_fy: session.encFy || '',
-      comp: session.comp || '',
+      password: payload.password,
       cap: payload.captchaText,
+      security_code: payload.captchaText,
+      f: session.f || '',
+      enc_fy: session.encFy || '',
+      fy: session.fy,
+      comp: session.comp || 'NETAJI SUBHAS UNIVERSITY OF TECHNOLOGY',
       t: session.t || 'swx',
       HRAND_NUM: session.hrandNum || '',
       login: 'Login',
+      Submit: 'Login',
     };
 
     let html: string;
@@ -210,6 +215,7 @@ export class SessionEngineService {
           isAuthenticated: true,
           rollNo: payload.rollNo,
           serializedCookies: cookies,
+          f: undefined,
           encFy: undefined,
           comp: undefined,
           t: undefined,

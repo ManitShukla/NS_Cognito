@@ -8,6 +8,7 @@ export interface ExtractedLoginForm {
   t: string;
   hrandNum: string;
   captchaPath: string;
+  f?: string;
 }
 
 export type LoginClassificationResult =
@@ -29,13 +30,19 @@ export class PlumwareHtmlParser {
   static parseLoginForm(html: string): ExtractedLoginForm {
     const $ = cheerio.load(html);
 
-    // 1. Extract hidden encrypted financial year token (enc_fy)
+    // 1. Extract hidden form routing/validation token (f)
+    const f =
+      $('input[name="f"]').val()?.toString() ||
+      $('#f').val()?.toString() ||
+      '';
+
+    // 2. Extract hidden encrypted financial year token (enc_fy)
     const encFy =
       $('input[name="enc_fy"]').val()?.toString() ||
       $('#enc_fy').val()?.toString() ||
       '';
 
-    // 2. Extract selected or default academic year (fy)
+    // 3. Extract selected or default academic year (fy)
     let fy =
       $('select[name="fy"] option[selected]').val()?.toString() ||
       $('#fy option[selected]').val()?.toString() ||
@@ -52,25 +59,25 @@ export class PlumwareHtmlParser {
       fy = `${startYear}-${endYearShort}`;
     }
 
-    // 3. Extract company identifier (comp)
+    // 4. Extract company identifier (comp)
     const comp =
       $('input[name="comp"]').val()?.toString() ||
       $('#comp').val()?.toString() ||
       'NETAJI SUBHAS UNIVERSITY OF TECHNOLOGY';
 
-    // 4. Extract form routing token (t)
+    // 5. Extract form routing token (t)
     const t =
       $('input[name="t"]').val()?.toString() ||
       $('#t').val()?.toString() ||
       'swx';
 
-    // 5. Extract anti-replay random number (HRAND_NUM)
+    // 6. Extract anti-replay random number (HRAND_NUM)
     const hrandNum =
       $('input[name="HRAND_NUM"]').val()?.toString() ||
       $('#HRAND_NUM').val()?.toString() ||
       String(Math.floor(Math.random() * 90000) + 10000);
 
-    // 6. Extract CAPTCHA image element source (captchaimg)
+    // 7. Extract CAPTCHA image element source (captchaimg)
     let captchaPath =
       $('#captchaimg').attr('src')?.trim() ||
       $('img[src*="captcha"]').attr('src')?.trim() ||
@@ -103,6 +110,7 @@ export class PlumwareHtmlParser {
       t,
       hrandNum,
       captchaPath,
+      f,
     };
   }
 
