@@ -24,7 +24,7 @@ export interface RedisSessionStoreOptions {
  * ensuring zero handshake crashes on serverless instances.
  */
 export class RedisSessionStore implements ISessionStore {
-  private readonly client: Redis;
+  private readonly client: Redis | null = null;
   private readonly fallbackStore: MemorySessionStore;
   private readonly keyPrefix: string;
   private readonly defaultTtlSeconds: number;
@@ -45,7 +45,7 @@ export class RedisSessionStore implements ISessionStore {
         maxRetriesPerRequest: 2,
         connectTimeout: 4000,
         enableReadyCheck: false,
-        lazyConnect: false,
+        lazyConnect: true, // Lazy connect avoids blocking lambda cold-starts or unhandled exceptions
         retryStrategy(times) {
           if (times > 3) return null; // Fast fail to avoid blocking serverless cycles
           return Math.min(times * 100, 1000);
@@ -58,18 +58,28 @@ export class RedisSessionStore implements ISessionStore {
         };
       }
 
-      this.client = new Redis(url, redisOptions);
+      try {
+        const client = new Redis(url, redisOptions);
 
-      this.client.on('error', (err: unknown) => {
-        logger.error(
+        client.on('error', (err: unknown) => {
+          logger.warn(
+            'REDIS',
+            `Cloud Redis connection warning: ${err instanceof Error ? err.message : String(err)}. Falling back to in-memory cache.`
+          );
+        });
+
+        client.on('connect', () => {
+          logger.info('REDIS', 'Connected to Cloud Redis session store successfully');
+        });
+
+        this.client = client;
+      } catch (err: unknown) {
+        logger.warn(
           'REDIS',
-          `Cloud Redis connection warning: ${err instanceof Error ? err.message : String(err)}. Falling back to in-memory cache.`
+          `Failed to instantiate Redis client (${err instanceof Error ? err.message : String(err)}). Seamlessly running in-memory session cache.`
         );
-      });
-
-      this.client.on('connect', () => {
-        logger.info('REDIS', 'Connected to Cloud Redis session store successfully');
-      });
+        this.client = null;
+      }
     }
   }
 
@@ -106,6 +116,11 @@ export class RedisSessionStore implements ISessionStore {
       rollNo: state.rollNo,
     };
 
+    if (!this.client) {
+      await this.fallbackStore.set(sessionToken, state, effectiveTtl);
+      return;
+    }
+
     try {
       await this.client.set(key, JSON.stringify(payload), 'EX', effectiveTtl);
       logger.debug(
@@ -130,41 +145,43 @@ export class RedisSessionStore implements ISessionStore {
     if (this.isDestroyed) return null;
     const key = this.getKey(sessionToken);
 
-    try {
-      const data = await this.client.get(key);
-      if (data) {
-        const parsed = JSON.parse(data);
-        let cookieJar: CookieJar;
+    if (this.client) {
+      try {
+        const data = await this.client.get(key);
+        if (data) {
+          const parsed = JSON.parse(data);
+          let cookieJar: CookieJar;
 
-        if (parsed.cookieJarSerialized) {
-          cookieJar = CookieJar.deserializeSync(parsed.cookieJarSerialized);
-        } else {
-          cookieJar = new CookieJar();
+          if (parsed.cookieJarSerialized) {
+            cookieJar = CookieJar.deserializeSync(parsed.cookieJarSerialized);
+          } else {
+            cookieJar = new CookieJar();
+          }
+
+          const state: SessionState = {
+            sessionToken: parsed.sessionToken,
+            cookieJar,
+            encFy: parsed.encFy,
+            fy: parsed.fy,
+            comp: parsed.comp,
+            t: parsed.t,
+            hrandNum: parsed.hrandNum,
+            captchaPath: parsed.captchaPath,
+            createdAt: parsed.createdAt,
+            expiresAt: parsed.expiresAt,
+            isAuthenticated: Boolean(parsed.isAuthenticated),
+            rollNo: parsed.rollNo,
+            serializedCookies: parsed.serializedCookies,
+          };
+
+          return state;
         }
-
-        const state: SessionState = {
-          sessionToken: parsed.sessionToken,
-          cookieJar,
-          encFy: parsed.encFy,
-          fy: parsed.fy,
-          comp: parsed.comp,
-          t: parsed.t,
-          hrandNum: parsed.hrandNum,
-          captchaPath: parsed.captchaPath,
-          createdAt: parsed.createdAt,
-          expiresAt: parsed.expiresAt,
-          isAuthenticated: Boolean(parsed.isAuthenticated),
-          rollNo: parsed.rollNo,
-          serializedCookies: parsed.serializedCookies,
-        };
-
-        return state;
+      } catch (err: unknown) {
+        logger.warn(
+          'REDIS',
+          `Error querying Cloud Redis for session ${sessionToken.slice(0, 8)}: ${err instanceof Error ? err.message : String(err)}. Checking in-memory fallback.`
+        );
       }
-    } catch (err: unknown) {
-      logger.warn(
-        'REDIS',
-        `Error querying Cloud Redis for session ${sessionToken.slice(0, 8)}: ${err instanceof Error ? err.message : String(err)}. Checking in-memory fallback.`
-      );
     }
 
     // Graceful fallback to ephemeral in-memory cache
@@ -178,11 +195,13 @@ export class RedisSessionStore implements ISessionStore {
     if (this.isDestroyed) return false;
     const key = this.getKey(sessionToken);
     let deletedRedis = false;
-    try {
-      const deleted = await this.client.del(key);
-      deletedRedis = deleted > 0;
-    } catch {
-      // Fallback silently handles deletion
+    if (this.client) {
+      try {
+        const deleted = await this.client.del(key);
+        deletedRedis = deleted > 0;
+      } catch {
+        // Fallback silently handles deletion
+      }
     }
     const deletedFallback = await this.fallbackStore.delete(sessionToken);
     return deletedRedis || deletedFallback;
@@ -197,19 +216,21 @@ export class RedisSessionStore implements ISessionStore {
     const existing = await this.get(sessionToken);
     if (!existing) return;
 
-    try {
-      const remainingTtl = await this.client.ttl(key);
-      if (remainingTtl > 0) {
-        const merged: SessionState = {
-          ...existing,
-          ...updates,
-          cookieJar: updates.cookieJar || existing.cookieJar,
-        };
-        await this.set(sessionToken, merged, remainingTtl);
-        return;
+    if (this.client) {
+      try {
+        const remainingTtl = await this.client.ttl(key);
+        if (remainingTtl > 0) {
+          const merged: SessionState = {
+            ...existing,
+            ...updates,
+            cookieJar: updates.cookieJar || existing.cookieJar,
+          };
+          await this.set(sessionToken, merged, remainingTtl);
+          return;
+        }
+      } catch {
+        logger.warn('REDIS', 'Redis update failed; updating in-memory fallback');
       }
-    } catch {
-      logger.warn('REDIS', 'Redis update failed; updating in-memory fallback');
     }
 
     await this.fallbackStore.update(sessionToken, updates);
@@ -219,6 +240,7 @@ export class RedisSessionStore implements ISessionStore {
    * Pings Redis to verify connectivity (used by readiness probes).
    */
   async ping(): Promise<boolean> {
+    if (!this.client) return false;
     try {
       const pong = await this.client.ping();
       return pong === 'PONG';
@@ -233,11 +255,13 @@ export class RedisSessionStore implements ISessionStore {
   async destroy(): Promise<void> {
     if (this.isDestroyed) return;
     this.isDestroyed = true;
-    try {
-      await this.client.quit();
-      logger.info('REDIS', 'Cloud Redis session connection closed cleanly');
-    } catch {
-      this.client.disconnect();
+    if (this.client) {
+      try {
+        await this.client.quit();
+        logger.info('REDIS', 'Cloud Redis session connection closed cleanly');
+      } catch {
+        this.client.disconnect();
+      }
     }
     await this.fallbackStore.destroy();
   }

@@ -30,14 +30,20 @@ export function createApiRouter(
     });
   });
 
-  // Authentication endpoints
-  router.use('/v1/auth', createAuthRouter(authController));
+  // Authentication endpoints (supporting both /v1/auth and /auth)
+  const authRouter = createAuthRouter(authController);
+  router.use('/v1/auth', authRouter);
+  router.use('/auth', authRouter);
 
-  // Student academic telemetry endpoints
-  router.use('/v1/student', createStudentRouter(studentController));
+  // Student academic telemetry endpoints (supporting both /v1/student and /student)
+  const studentRouter = createStudentRouter(studentController);
+  router.use('/v1/student', studentRouter);
+  router.use('/student', studentRouter);
 
-  // Timetable scheduling & explorer endpoints
-  router.use('/v1/timetable', createTimetableRouter(timetableController));
+  // Timetable scheduling & explorer endpoints (supporting both /v1/timetable and /timetable)
+  const timetableRouter = createTimetableRouter(timetableController);
+  router.use('/v1/timetable', timetableRouter);
+  router.use('/timetable', timetableRouter);
 
   return router;
 }

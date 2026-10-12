@@ -112,6 +112,24 @@ describe('Vercel Serverless Deployment & Runtime Adaptation Test Suite', () => {
       expect(response.body.status).toBe('success');
       expect(response.body.data.sessionToken).toBeDefined();
     });
+
+    it('handles GET /api/v1/auth/session returning 200 with valid Base64 JPEG/PNG CAPTCHA', async () => {
+      const response = await request(app).get('/api/v1/auth/session');
+      expect(response.status).toBe(200);
+      expect(response.headers['content-type']).toContain('application/json');
+      expect(response.body.status).toBe('success');
+      expect(response.body.data.sessionToken).toBeDefined();
+      expect(response.body.data.captchaBase64).toMatch(/^data:image\/(jpeg|png);base64,[A-Za-z0-9+/=]+$/);
+    });
+
+    it('handles GET /api/auth/session (without v1) returning 200 with valid Base64 JPEG/PNG CAPTCHA', async () => {
+      const response = await request(app).get('/api/auth/session');
+      expect(response.status).toBe(200);
+      expect(response.headers['content-type']).toContain('application/json');
+      expect(response.body.status).toBe('success');
+      expect(response.body.data.sessionToken).toBeDefined();
+      expect(response.body.data.captchaBase64).toMatch(/^data:image\/(jpeg|png);base64,[A-Za-z0-9+/=]+$/);
+    });
   });
 
   // ===========================================================================
@@ -381,6 +399,23 @@ describe('Vercel Serverless Deployment & Runtime Adaptation Test Suite', () => {
 
       const jar = new CookieJar();
       await expect(client.fetchLoginPage(jar)).rejects.toThrow(UpstreamTimeoutError);
+    });
+
+    it('PlumwareHttpClient throws PlumwareTripwireError when upstream returns non-image HTML buffer for CAPTCHA', async () => {
+      const client = new PlumwareHttpClient({
+        baseURL: 'https://www.imsnsit.org/imsnsit',
+        timeoutMs: 5000,
+      });
+      // Mock executeWithRetry to return HTML instead of image buffer
+      (client as any).executeWithRetry = vi.fn().mockResolvedValue({
+        data: Buffer.from('<html><body>Access Denied: Session Expired</body></html>'),
+        status: 200,
+      });
+
+      const jar = new CookieJar();
+      await expect(client.fetchCaptchaBuffer(jar, 'captcha.php')).rejects.toThrow(
+        /Upstream gateway returned non-image payload/
+      );
     });
   });
 

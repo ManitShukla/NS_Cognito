@@ -4,7 +4,7 @@ import { HttpsProxyAgent } from 'https-proxy-agent';
 import type { CookieJar } from 'tough-cookie';
 import { env } from '../../config/env.js';
 import { logger } from '../../utils/logger.js';
-import { PlumwareDownError, UpstreamTimeoutError } from '../../utils/errors.js';
+import { PlumwareDownError, UpstreamTimeoutError, PlumwareTripwireError } from '../../utils/errors.js';
 import { upstreamTrafficGate } from './upstream_traffic_gate.js';
 
 export interface HttpClientOptions {
@@ -192,7 +192,23 @@ export class PlumwareHttpClient {
       })
     );
 
-    return Buffer.from(response.data);
+    const buffer = Buffer.from(response.data);
+
+    // Validate binary buffer against known image magic headers (JPEG, PNG, GIF)
+    const isJpeg = buffer.length > 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+    const isPng = buffer.length > 4 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
+    const isGif = buffer.length > 3 && buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46;
+
+    if (!isJpeg && !isPng && !isGif) {
+      const preview = buffer.toString('utf8', 0, 120).replace(/\s+/g, ' ').trim();
+      logger.error('HTTP', `Upstream returned invalid non-image payload for CAPTCHA challenge: "${preview}"`);
+      throw new PlumwareTripwireError(
+        'Upstream gateway returned non-image payload for CAPTCHA challenge.',
+        { preview, bufferLength: buffer.length }
+      );
+    }
+
+    return buffer;
   }
 
   /**

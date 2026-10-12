@@ -48,13 +48,14 @@ export function createApp(): AppContext {
       origin: (origin, callback) => {
         if (!origin) return callback(null, true);
         if (allowedOrigins.includes(origin)) return callback(null, true);
-        if (Boolean(process.env.VERCEL) && origin.endsWith('.vercel.app')) {
+        if (origin.endsWith('.vercel.app')) {
           return callback(null, true);
         }
         if (process.env.NODE_ENV !== 'production' && (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
           return callback(null, true);
         }
-        return callback(new Error(`CORS policy violation: origin ${origin} is not permitted.`));
+        // Decline CORS gracefully without unhandled 500 exceptions
+        return callback(null, false);
       },
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -88,7 +89,7 @@ export function createApp(): AppContext {
         req.url.startsWith('/student') ||
         req.url.startsWith('/timetable');
       if (isApiRoute) {
-        req.url = `/api${req.url.startsWith('/v1') ? '' : '/v1'}${req.url}`;
+        req.url = `/api${req.url}`;
       }
     }
     next();
