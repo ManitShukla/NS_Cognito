@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { logger } from '../utils/logger.js';
+import { telemetryMetrics } from '../services/telemetry_metrics.service.js';
 
 /**
  * High-density monospaced request telemetry middleware.
@@ -13,6 +14,7 @@ export function requestLogger(req: Request, res: Response, next: NextFunction): 
     const { method, originalUrl } = req;
     const { statusCode } = res;
 
+    telemetryMetrics.recordRequest(statusCode);
     logger.info('HTTP', `${method} ${originalUrl} -> ${statusCode} [${duration}ms]`);
   });
 

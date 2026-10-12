@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Time Table - Complex Spans & 5-Period Stress Test</title>
+</head>
+<body>
+  <h2>Academic Session: 2026-27 | Program: B.Tech | Department: CSE | Semester: 4 | Section: 1</h2>
+  <table border="1" cellpadding="3" cellspacing="0" width="100%">
+    <thead>
+      <tr>
+        <th width="12%">Day / Period</th>
+        <th width="17%">09:00 - 10:00<br>P1</th>
+        <th width="17%">10:00 - 11:00<br>P2</th>
+        <th width="17%">11:00 - 12:00<br>P3</th>
+        <th width="17%">12:00 - 13:00<br>P4</th>
+        <th width="17%">13:00 - 14:00<br>P5</th>
+      </tr>
+    </thead>
+    <tbody>
+      <!-- MONDAY: Stress Test Case (2-hour lab at P2-P3, Lunch at P4, Lecture at P5) -->
+      <tr>
+        <td>Monday</td>
+        <td>CS101 (L)<br>LT-1<br>Prof. A</td>
+        <!-- 2-hour lab occupying Periods 2 and 3 -->
+        <td colspan="2">CS102 (P)<br>[Lab 1]<br>Dr. B</td>
+        <!-- Lunch at Period 4 (12:00) -->
+        <td align="center">LUNCH</td>
+        <!-- Lecture strictly landing at Period 5 (13:00) -->
+        <td>CS103 (L)<br>LT-2<br>Prof. C</td>
+      </tr>
+
+      <!-- TUESDAY: Rowspan at Period 5 spanning to Wednesday -->
+      <tr>
+        <td>Tuesday</td>
+        <td>CS103 (L)<br>LT-2<br>Prof. C</td>
+        <td>CS101 (L)<br>LT-1<br>Prof. A</td>
+        <td>CS104 (L)<br>LT-3<br>Prof. D</td>
+        <td align="center">LUNCH</td>
+        <!-- 2-day seminar occupying Period 5 on Tuesday and Wednesday -->
+        <td rowspan="2">SEMINAR (L)<br>Auditorium<br>Prof. Keynote</td>
+      </tr>
+
+      <!-- WEDNESDAY: 3-hour workshop at P1-P3, Lunch at P4, P5 occupied by Tuesday -->
+      <tr>
+        <td>Wednesday</td>
+        <td colspan="3">WORKSHOP (P)<br>Mechanical Shop<br>Prof. Mechanix</td>
+        <td align="center">LUNCH</td>
+        <!-- Period 5 is occupied by Tuesday's rowspan -->
+      </tr>
+
+      <!-- THURSDAY -->
+      <tr>
+        <td>Thursday</td>
+        <td>CS104 (L)<br>LT-3<br>Prof. D</td>
+        <td colspan="2">G1: CS101 (P) [Lab 1] / G2: CS104 (P) [Lab 2]</td>
+        <td align="center">LUNCH</td>
+        <td>CS102 (L)<br>LT-1<br>Prof. B</td>
+      </tr>
+
+      <!-- FRIDAY -->
+      <tr>
+        <td>Friday</td>
+        <td>CS102 (L)<br>LT-1<br>Prof. B</td>
+        <td>CS103 (L)<br>LT-2<br>Prof. C</td>
+        <td>CS101 (L)<br>LT-1<br>Prof. A</td>
+        <td align="center">LUNCH</td>
+        <td>CS104 (L)<br>LT-3<br>Prof. D</td>
+      </tr>
+    </tbody>
+  </table>
+</body>
+</html>

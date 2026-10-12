@@ -12,6 +12,7 @@ import {
   InvalidCaptchaError,
   InvalidCredentialsError,
   PlumwareTripwireError,
+  SessionAlreadyUsedError,
 } from '../utils/errors.js';
 
 export interface SessionEngineDependencies {
@@ -131,6 +132,23 @@ export class SessionEngineService {
       throw new SessionExpiredError();
     }
 
+    // Replay Protection: Reject if session was already authenticated
+    if (session.isAuthenticated) {
+      throw new SessionAlreadyUsedError(
+        'Session has already been authenticated. Acquire a fresh session token to log in again.'
+      );
+    }
+
+    // Single-use CAPTCHA protection: Reject if challenge was already consumed
+    if (!session.captchaPath) {
+      throw new SessionExpiredError('CAPTCHA challenge has already been consumed. Please refresh the CAPTCHA.');
+    }
+
+    // Burn CAPTCHA challenge immediately on session state to prevent replay attacks
+    await this.sessionStore.update(payload.sessionToken, {
+      captchaPath: undefined,
+    });
+
     logger.info(
       'AUTH',
       `Submitting authentication handshake for Roll: ${payload.rollNo} (Session: ${session.sessionToken.slice(0, 8)}...)`
@@ -150,8 +168,21 @@ export class SessionEngineService {
       login: 'Login',
     };
 
-    // 2. Execute POST request against Plumware
-    const { html, statusCode, location } = await this.httpClient.submitLogin(session.cookieJar, formPayload);
+    let html: string;
+    let statusCode: number;
+    let location: string | undefined;
+
+    try {
+      // 2. Execute POST request against Plumware
+      const res = await this.httpClient.submitLogin(session.cookieJar, formPayload);
+      html = res.html;
+      statusCode = res.statusCode;
+      location = res.location;
+    } catch (err: unknown) {
+      // Immediate single-use purge on network/gateway error
+      await this.sessionStore.delete(payload.sessionToken);
+      throw err;
+    }
 
     // 3. Classify response
     const outcome = PlumwareHtmlParser.classifyLoginResponse(html, statusCode, location);
@@ -159,12 +190,15 @@ export class SessionEngineService {
 
     switch (outcome.type) {
       case 'INVALID_CAPTCHA':
+        await this.sessionStore.delete(payload.sessionToken);
         throw new InvalidCaptchaError(outcome.reason);
 
       case 'INVALID_CREDENTIALS':
+        await this.sessionStore.delete(payload.sessionToken);
         throw new InvalidCredentialsError(outcome.reason);
 
       case 'ACCESS_DENIED':
+        await this.sessionStore.delete(payload.sessionToken);
         throw new PlumwareTripwireError(outcome.reason, { location });
 
       case 'SUCCESS': {
@@ -199,6 +233,7 @@ export class SessionEngineService {
 
       case 'UNKNOWN':
       default:
+        await this.sessionStore.delete(payload.sessionToken);
         logger.error('AUTH', 'Unrecognized Plumware response signature', { preview: outcome.rawPreview });
         throw new PlumwareTripwireError(
           'Unrecognized response received from university portal during login.',

@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
-import { AppError } from '../utils/errors.js';
+import { ZodError } from 'zod';
+import { AppError, RequestValidationError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 
 /**
@@ -15,6 +16,20 @@ export function errorHandler(
   if (err instanceof AppError) {
     logger.warn('ERROR', `[${err.code}] ${err.message}`, err.details);
     res.status(err.statusCode).json(err.toJSON());
+    return;
+  }
+
+  if (err instanceof ZodError) {
+    const formattedErrors: Record<string, string> = {};
+    for (const issue of err.issues) {
+      const field = Array.isArray(issue.path) && issue.path.length > 0 ? issue.path.join('.') : 'root';
+      formattedErrors[field] = issue.message;
+    }
+    const appError = new RequestValidationError('Invalid request payload parameters', {
+      validationErrors: formattedErrors,
+    });
+    logger.warn('ERROR', `[${appError.code}] ${appError.message}`, appError.details);
+    res.status(appError.statusCode).json(appError.toJSON());
     return;
   }
 

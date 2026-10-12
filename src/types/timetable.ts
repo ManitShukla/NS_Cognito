@@ -83,6 +83,7 @@ export interface PersonalizedSlot {
   group: string;
   room: string;
   faculty: string;
+  spanHours?: number;
 }
 
 /**
@@ -140,7 +141,11 @@ export const TimetableQuerySchema = z.object({
     .transform((val) => val.trim().toUpperCase()),
   semester: z.coerce.number().int().min(1).max(8).optional(),
   section: z.string().default('1').transform((val) => val.trim()),
-  group: z.string().default('All').transform((val) => val.trim()),
+  group: z
+    .string()
+    .optional()
+    .default('All')
+    .transform((val) => val?.trim() || 'All'),
 });
 
 export type TimetableQuery = z.infer<typeof TimetableQuerySchema>;

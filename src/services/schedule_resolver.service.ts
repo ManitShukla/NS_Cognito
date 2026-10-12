@@ -3,7 +3,6 @@ import {
   DAYS_OF_WEEK,
   type DayOfWeek,
   type MasterSectionTimetable,
-  type MasterTimetableSlot,
   type PersonalizedSlot,
   type PersonalizedStudentSchedule,
   type RawTimeSlot,
@@ -71,6 +70,7 @@ export class ScheduleResolver {
         group: matchingSession.group,
         room: matchingSession.room,
         faculty: matchingSession.faculty,
+        spanHours: durationHours,
       };
 
       schedule[slot.day].push(personalizedSlot);
@@ -117,7 +117,19 @@ export class ScheduleResolver {
   }
 
   /**
-   * Filters candidate sessions for a time slot down to the session matching the student's group.
+   * Normalizes group identifiers (e.g. 'T1', 'B1', 'Group 1' -> 'G1').
+   */
+  private static normalizeGroup(group: string): string {
+    const clean = group.toUpperCase().replace(/\s+/g, '');
+    if (clean.startsWith('GROUP')) return `G${clean.replace('GROUP', '').replace(/[-:]/g, '')}`;
+    if (clean.startsWith('BATCH')) return `G${clean.replace('BATCH', '').replace(/[-:]/g, '')}`;
+    if (/^[TB]\d+$/.test(clean)) return `G${clean.slice(1)}`;
+    return clean;
+  }
+
+  /**
+   * Filters candidate sessions for a time slot down to the session matching the student's group
+   * and registered elective enrollments.
    */
   private static selectMatchingSession(
     candidates: RawTimeSlot[],
@@ -126,18 +138,39 @@ export class ScheduleResolver {
   ): RawTimeSlot | null {
     if (candidates.length === 0) return null;
 
-    for (const candidate of candidates) {
-      const candidateGroup = candidate.group.toUpperCase().replace(/\s+/g, '');
+    // Handle Elective Course Mapping:
+    // If the slot contains candidates for multiple distinct course codes (e.g., CS301 vs CS302),
+    // and the student has registeredCourses listed, filter strictly to the student's enrolled course.
+    let eligibleCandidates = candidates;
+    const distinctCourseCodes = new Set(candidates.map((c) => c.courseCode.toUpperCase()));
+    const hasMultipleElectives = distinctCourseCodes.size > 1;
+
+    if (hasMultipleElectives && profile.registeredCourses && profile.registeredCourses.length > 0) {
+      const registeredCodes = new Set(
+        profile.registeredCourses.map((rc) => rc.courseCode.toUpperCase())
+      );
+      eligibleCandidates = candidates.filter((c) => registeredCodes.has(c.courseCode.toUpperCase()));
+
+      // If student has registered courses but none match this elective slot, mark as free period (null)
+      if (eligibleCandidates.length === 0) {
+        return null;
+      }
+    }
+
+    const normalizedDefaultGroup = this.normalizeGroup(effectiveDefaultGroup);
+
+    for (const candidate of eligibleCandidates) {
+      const candidateGroup = this.normalizeGroup(candidate.group);
 
       // 1. Universal Section-wide Lecture / Tutorial
-      if (candidateGroup === 'ALL' || candidate.component === 'Lecture' && candidateGroup === 'ALL') {
+      if (candidateGroup === 'ALL' || (candidate.component === 'Lecture' && candidateGroup === 'ALL')) {
         return candidate;
       }
 
       // 2. Exact match against granular component mapping (e.g. 'FCCS0102:PRACTICAL')
       const componentKey = `${candidate.courseCode}:${candidate.component.toUpperCase()}`;
       if (profile.componentGroups && profile.componentGroups[componentKey]) {
-        const assignedGroup = profile.componentGroups[componentKey].toUpperCase().replace(/\s+/g, '');
+        const assignedGroup = this.normalizeGroup(profile.componentGroups[componentKey]);
         if (assignedGroup === candidateGroup || candidateGroup === 'ALL') {
           return candidate;
         }
@@ -146,7 +179,7 @@ export class ScheduleResolver {
 
       // 3. Match against course group mapping (e.g. 'FCCS0102')
       if (profile.courseGroups && profile.courseGroups[candidate.courseCode]) {
-        const assignedGroup = profile.courseGroups[candidate.courseCode].toUpperCase().replace(/\s+/g, '');
+        const assignedGroup = this.normalizeGroup(profile.courseGroups[candidate.courseCode]);
         if (assignedGroup === candidateGroup || candidateGroup === 'ALL') {
           return candidate;
         }
@@ -154,7 +187,7 @@ export class ScheduleResolver {
       }
 
       // 4. Match against student's effective default group (e.g. 'G1')
-      if (candidateGroup === effectiveDefaultGroup) {
+      if (candidateGroup === normalizedDefaultGroup) {
         return candidate;
       }
     }

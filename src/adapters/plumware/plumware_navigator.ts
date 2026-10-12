@@ -1,5 +1,5 @@
 import * as cheerio from 'cheerio';
-import { PlumwareTripwireError, SessionExpiredError } from '../../utils/errors.js';
+import { PlumwareTripwireError, PortalDesyncError, SessionExpiredError } from '../../utils/errors.js';
 import { logger } from '../../utils/logger.js';
 
 export interface ExtractedNavigationLinks {
@@ -130,9 +130,11 @@ export class PlumwareNavigator {
       lower.includes('access denied!') ||
       lower.includes('access denied') ||
       lower.includes('invalid attempt') ||
-      lower.includes('plum-security.gif')
+      lower.includes('plum-security.gif') ||
+      lower.includes("alert('access denied") ||
+      lower.includes('alert("access denied')
     ) {
-      throw new PlumwareTripwireError(
+      throw new PortalDesyncError(
         'Plumware rejected the dynamic navigation token. Frame state or Referer desynchronization detected.',
         { preview: html.slice(0, 300), location }
       );

@@ -5,13 +5,18 @@
   "type": "module",
   "main": "dist/src/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && vite build",
+    "build:server": "tsc",
+    "build:client": "vite build",
+    "client": "vite",
+    "preview": "vite preview",
     "start": "node dist/src/index.js",
     "dev": "tsx watch src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:handshake": "tsx scripts/test_auth_handshake.ts",
-    "test:academic": "tsx scripts/test_academic_engine.ts"
+    "test:academic": "tsx scripts/test_academic_engine.ts",
+    "test:timetable": "tsx scripts/test_timetable_engine.ts"
   },
   "keywords": [
     "nsut",
@@ -31,19 +36,30 @@
     "dotenv": "^18.0.7",
     "express": "^5.3.0",
     "helmet": "^8.3.0",
+    "lucide-react": "^1.55.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "tough-cookie": "^6.0.2",
     "uuid": "^14.0.3",
     "zod": "^4.6.6"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@types/supertest": "^7.2.1",
     "@types/tough-cookie": "^4.0.5",
+    "@vitejs/plugin-react": "^6.1.2",
+    "autoprefixer": "^10.6.1",
+    "postcss": "^8.5.29",
     "supertest": "^7.3.1",
+    "tailwindcss": "^4.3.3",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
+    "vite": "^8.3.4",
     "vitest": "^5.0.3"
   }
 }

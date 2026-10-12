@@ -109,6 +109,95 @@ export class PlumwareTimetableParser {
   }
 
   /**
+   * Helper to extract room/venue from session text.
+   */
+  private static extractRoom(text: string): string {
+    const bracketMatch = text.match(/\[([^\]]+)\]/);
+    if (bracketMatch) {
+      return bracketMatch[1].trim();
+    }
+    const roomPattern = /\b(LT-?\s*\d+|Block-?\s*[A-Za-z\d]+(?:\s*(?:Room|Lab)?\s*\d+)?|Room\s*[-:]?\s*\d+|Lab\s*[-:]?\s*\d+|Mechanical\s+Shop)\b/i;
+    const match = text.match(roomPattern);
+    if (match) {
+      return match[1].trim();
+    }
+    return 'TBA';
+  }
+
+  /**
+   * Helper to extract faculty name from session text.
+   */
+  private static extractFaculty(text: string): string {
+    const titleMatch = text.match(/(?:Prof\.|Dr\.|Mr\.|Ms\.)\s+[A-Za-z\.]+(?:\s+[A-Za-z\.]+)?/i);
+    if (titleMatch) {
+      return titleMatch[0].trim();
+    }
+    const parenMatch = text.match(/\(([A-Za-z\.\s]+)\)/);
+    if (parenMatch && !parenMatch[1].match(/^(L|P|T)$/i)) {
+      return parenMatch[1].trim();
+    }
+    return 'TBA';
+  }
+
+  /**
+   * Parses a single session chunk where all tokens belong to one class.
+   */
+  private static parseSingleSession(text: string): RawTimeSlot | null {
+    const clean = text.trim();
+    if (!clean || clean === '-' || clean === '.') return null;
+
+    const upper = clean.toUpperCase();
+    if (
+      upper === 'LUNCH' ||
+      upper === 'BREAK' ||
+      upper === 'RECESS' ||
+      upper === 'SELF STUDY' ||
+      upper === 'NO CLASSES SCHEDULED' ||
+      upper.includes('LIBRARY') ||
+      upper.includes('SPORTS') ||
+      upper.includes('MENTOR MENTEE')
+    ) {
+      return null;
+    }
+
+    const codeMatch = clean.match(/\b([A-Z]{2,5}\d{2,5}[A-Z]?|WORKSHOP|SEMINAR|PROJECT)\b/i);
+    if (!codeMatch) {
+      return null;
+    }
+    const courseCode = codeMatch[1].toUpperCase();
+
+    let component: TimetableComponent = 'Lecture';
+    if (upper.includes('(P)') || upper.includes('[P]') || upper.includes('LAB') || upper.includes('PRACTICAL')) {
+      component = 'Practical';
+    } else if (upper.includes('(T)') || upper.includes('[T]') || upper.includes('TUT') || upper.includes('TUTORIAL')) {
+      component = 'Tutorial';
+    } else if (upper.includes('(L)') || upper.includes('[L]') || upper.includes('LECTURE')) {
+      component = 'Lecture';
+    }
+
+    let group = 'All';
+    const groupMatch = clean.match(/\b(G[1-9]|Group\s*[-:]?\s*[1-9]|Batch\s*[-:]?\s*[A-Za-z\d]+)\b/i);
+    if (groupMatch) {
+      const rawGroup = groupMatch[1].toUpperCase().replace(/\s+/g, '');
+      group = rawGroup.startsWith('GROUP')
+        ? `G${rawGroup.replace('GROUP', '').replace(/[-:]/g, '')}`
+        : rawGroup;
+    }
+
+    const room = this.extractRoom(clean);
+    const faculty = this.extractFaculty(clean);
+
+    return {
+      courseCode,
+      component,
+      group,
+      room,
+      faculty,
+      rawText: clean,
+    };
+  }
+
+  /**
    * Parses text within a timetable cell into structured RawTimeSlot sessions.
    * Splits multi-group concurrent blocks (e.g. G1: Physics / G2: OOP) into separate sessions.
    */
@@ -121,119 +210,136 @@ export class PlumwareTimetableParser {
     const upper = trimmed.toUpperCase();
     // Non-academic break markers
     if (
-      upper.includes('LUNCH') ||
-      upper.includes('BREAK') ||
-      upper.includes('RECESS') ||
-      upper.includes('SELF STUDY') ||
-      upper.includes('NO CLASSES SCHEDULED') ||
+      upper === 'LUNCH' ||
+      upper === 'BREAK' ||
+      upper === 'RECESS' ||
+      upper === 'SELF STUDY' ||
+      upper === 'NO CLASSES SCHEDULED' ||
       upper.includes('LIBRARY') ||
-      upper.includes('SPORTS')
+      upper.includes('SPORTS') ||
+      upper.includes('MENTOR MENTEE')
     ) {
       return [];
     }
 
-    // Split candidates across explicit delimiters: '/' or distinct lines
-    // Example: "G1: FCCS0102 (P) [Lab 1] / G2: FCEE0106 (P) [Lab 2]"
-    const rawSegments = trimmed
-      .split(/(?:\s*\/\s*|\n\r?|\r)/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
+    // Check if text contains sub-batch/group patterns like G1:, G2:, Batch A:
+    const groupMarkerRegex = /\b(G[1-9]|Group\s*[-:]?\s*[1-9]|Batch\s*[-:]?\s*[A-Za-z\d]+)\s*[:\-]/i;
+    const hasGroupMarkers = groupMarkerRegex.test(trimmed);
 
-    // If segments don't have course codes on each line, check if parent line has course code
-    // Example: "FCMA0101 (T)" followed by "G1: Room 102 (Dr. Raman) / G2: Room 104 (Dr. Roy)"
-    let sharedCourseCode: string | undefined;
-    let sharedComponent: TimetableComponent | undefined;
+    if (hasGroupMarkers) {
+      const lines = trimmed.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
 
-    const firstCodeMatch = trimmed.match(/\b([A-Z]{2,5}\d{3,5}[A-Z]?)\b/);
-    if (firstCodeMatch) {
-      sharedCourseCode = firstCodeMatch[1];
-    }
-    if (upper.includes('(P)') || upper.includes('[P]') || upper.includes('LAB') || upper.includes('PRACTICAL')) {
-      sharedComponent = 'Practical';
-    } else if (upper.includes('(T)') || upper.includes('[T]') || upper.includes('TUT') || upper.includes('TUTORIAL')) {
-      sharedComponent = 'Tutorial';
-    } else if (upper.includes('(L)') || upper.includes('[L]') || upper.includes('LECTURE')) {
-      sharedComponent = 'Lecture';
-    }
+      let sharedCourseCode: string | undefined;
+      let sharedComponent: TimetableComponent | undefined;
 
-    const sessions: RawTimeSlot[] = [];
-
-    for (const segment of rawSegments) {
-      const segUpper = segment.toUpperCase();
-      if (
-        segUpper === '-' ||
-        segUpper.includes('LUNCH') ||
-        segUpper.includes('BREAK') ||
-        segUpper.includes('MENTOR') ||
-        segUpper.includes('SPORTS') ||
-        segUpper.includes('LIBRARY')
-      ) {
-        continue;
+      let startIndex = 0;
+      if (lines.length > 0 && !groupMarkerRegex.test(lines[0])) {
+        const headerLine = lines[0];
+        const codeMatch = headerLine.match(/\b([A-Z]{2,5}\d{2,5}[A-Z]?|WORKSHOP|SEMINAR|PROJECT)\b/i);
+        if (codeMatch) {
+          sharedCourseCode = codeMatch[1].toUpperCase();
+        }
+        const hdrUpper = headerLine.toUpperCase();
+        if (hdrUpper.includes('(P)') || hdrUpper.includes('[P]') || hdrUpper.includes('LAB') || hdrUpper.includes('PRACTICAL')) {
+          sharedComponent = 'Practical';
+        } else if (hdrUpper.includes('(T)') || hdrUpper.includes('[T]') || hdrUpper.includes('TUT') || hdrUpper.includes('TUTORIAL')) {
+          sharedComponent = 'Tutorial';
+        } else if (hdrUpper.includes('(L)') || hdrUpper.includes('[L]') || hdrUpper.includes('LECTURE')) {
+          sharedComponent = 'Lecture';
+        }
+        startIndex = 1;
       }
 
-      // 1. Course Code
-      const codeMatch = segment.match(/\b([A-Z]{2,5}\d{3,5}[A-Z]?)\b/);
-      const courseCode = codeMatch ? codeMatch[1] : sharedCourseCode;
-      if (!courseCode) {
-        // Skip if no course code can be mapped
-        continue;
-      }
-
-      // 2. Component Type
-      let component: TimetableComponent = sharedComponent || 'Lecture';
-      if (segUpper.includes('(P)') || segUpper.includes('[P]') || segUpper.includes('LAB') || segUpper.includes('PRACTICAL')) {
-        component = 'Practical';
-      } else if (segUpper.includes('(T)') || segUpper.includes('[T]') || segUpper.includes('TUT') || segUpper.includes('TUTORIAL')) {
-        component = 'Tutorial';
-      } else if (segUpper.includes('(L)') || segUpper.includes('[L]') || segUpper.includes('LECTURE')) {
-        component = 'Lecture';
-      }
-
-      // 3. Sub-Group / Batch
-      let group = 'All';
-      const groupMatch = segment.match(/\b(G[1-9]|Group\s*[-:]?\s*[1-9]|Batch\s*[-:]?\s*[A-Z\d]+|T[1-9]|B[1-9])\b/i);
-      if (groupMatch) {
-        const rawGroup = groupMatch[1].toUpperCase().replace(/\s+/g, '');
-        if (rawGroup.startsWith('GROUP')) {
-          group = `G${rawGroup.replace('GROUP', '').replace(/[-:]/g, '')}`;
-        } else if (rawGroup.startsWith('BATCH')) {
-          group = rawGroup;
+      const groupChunks: string[] = [];
+      for (let i = startIndex; i < lines.length; i++) {
+        const line = lines[i];
+        if (line.includes('/')) {
+          const parts = line.split(/\s*\/\s*/).map((p) => p.trim()).filter((p) => p.length > 0);
+          groupChunks.push(...parts);
         } else {
-          group = rawGroup;
+          groupChunks.push(line);
         }
       }
 
-      // 4. Room / Venue Extraction
-      let room = 'TBA';
-      const roomMatch = segment.match(
-        /\b(LT-?\s*\d+|Block-?\s*[A-Za-z\d]+(?:\s*(?:Room|Lab)?\s*\d+)?|Room\s*[-:]?\s*\d+|Lab\s*[-:]?\s*\d+|\[([^\]]+)\])\b/i
-      );
-      if (roomMatch) {
-        room = (roomMatch[2] || roomMatch[1]).replace(/[\[\]]/g, '').trim();
+      const sessions: RawTimeSlot[] = [];
+
+      for (const chunk of groupChunks) {
+        const match = chunk.match(/^(?:.*?\b)?(G[1-9]|Group\s*[-:]?\s*[1-9]|Batch\s*[-:]?\s*[A-Za-z\d]+)\s*[:\-]\s*(.*)$/i);
+        if (!match) {
+          continue;
+        }
+
+        const rawGroup = match[1].toUpperCase().replace(/\s+/g, '');
+        const group = rawGroup.startsWith('GROUP')
+          ? `G${rawGroup.replace('GROUP', '').replace(/[-:]/g, '')}`
+          : rawGroup;
+
+        const body = match[2].trim();
+        const bodyUpper = body.toUpperCase();
+
+        // If body indicates free slot or no class for this group, skip
+        if (
+          !body ||
+          body === '-' ||
+          body === '.' ||
+          bodyUpper === 'NIL' ||
+          bodyUpper === 'FREE' ||
+          bodyUpper.startsWith('NO CLASS')
+        ) {
+          continue;
+        }
+
+        const codeMatch = body.match(/\b([A-Z]{2,5}\d{2,5}[A-Z]?|WORKSHOP|SEMINAR|PROJECT)\b/i);
+        const courseCode = codeMatch ? codeMatch[1].toUpperCase() : sharedCourseCode;
+        if (!courseCode) {
+          continue;
+        }
+
+        let component: TimetableComponent = sharedComponent || 'Practical';
+        if (bodyUpper.includes('(P)') || bodyUpper.includes('[P]') || bodyUpper.includes('LAB') || bodyUpper.includes('PRACTICAL')) {
+          component = 'Practical';
+        } else if (bodyUpper.includes('(T)') || bodyUpper.includes('[T]') || bodyUpper.includes('TUT') || bodyUpper.includes('TUTORIAL')) {
+          component = 'Tutorial';
+        } else if (bodyUpper.includes('(L)') || bodyUpper.includes('[L]') || bodyUpper.includes('LECTURE')) {
+          component = 'Lecture';
+        }
+
+        const room = this.extractRoom(body);
+        const faculty = this.extractFaculty(body);
+
+        sessions.push({
+          courseCode,
+          component,
+          group,
+          room,
+          faculty,
+          rawText: chunk,
+        });
       }
 
-      // 5. Faculty Name Extraction
-      let faculty = 'TBA';
-      const facultyTitleMatch = segment.match(/(?:Prof\.|Dr\.|Mr\.|Ms\.)\s+[A-Za-z\.]+(?:\s+[A-Za-z\.]+)?/i);
-      const facultyParenMatch = segment.match(/\(([A-Za-z\.\s]+)\)/);
-
-      if (facultyTitleMatch) {
-        faculty = facultyTitleMatch[0].trim();
-      } else if (facultyParenMatch && !facultyParenMatch[1].match(/^(L|P|T)$/i)) {
-        faculty = facultyParenMatch[1].trim();
+      if (sessions.length > 0) {
+        return sessions;
       }
-
-      sessions.push({
-        courseCode,
-        component,
-        group,
-        room,
-        faculty,
-        rawText: segment,
-      });
     }
 
-    return sessions;
+    // If no group markers, check if text has multiple sessions separated by '/'
+    if (trimmed.includes('/')) {
+      const segments = trimmed.split(/\s*\/\s*/).map((s) => s.trim()).filter((s) => s.length > 0);
+      const sessions: RawTimeSlot[] = [];
+      for (const seg of segments) {
+        const session = this.parseSingleSession(seg);
+        if (session) {
+          sessions.push(session);
+        }
+      }
+      if (sessions.length > 0) {
+        return sessions;
+      }
+    }
+
+    // Single session across entire cell text
+    const single = this.parseSingleSession(trimmed);
+    return single ? [single] : [];
   }
 
   /**
@@ -393,7 +499,9 @@ export class PlumwareTimetableParser {
         );
         const rowspan = parseInt(cellEl.attr('rowspan') || '1', 10) || 1;
 
-        const cellText = cellEl.text().trim();
+        const cellClone = cellEl.clone();
+        cellClone.find('br').replaceWith('\n');
+        const cellText = cellClone.text().trim();
         const candidateSessions = this.parseCellSessions(cellText);
 
         if (candidateSessions.length > 0) {

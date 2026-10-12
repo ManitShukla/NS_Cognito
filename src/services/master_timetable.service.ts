@@ -13,26 +13,32 @@ import { logger } from '../utils/logger.js';
 interface CachedTimetableEntry {
   timetable: MasterSectionTimetable;
   expiresAt: number;
+  staleAfter: number;
 }
 
 export interface MasterTimetableServiceDependencies {
   httpClient?: PlumwareHttpClient;
   cacheTtlSeconds?: number;
+  staleTtlSeconds?: number;
 }
 
 /**
  * Service managing Master Section Timetables: scraping, parsing,
- * deterministic caching with 7-day TTL, and on-demand cache warming.
+ * deterministic caching with 7-day TTL, SWR background revalidation,
+ * and on-demand cache warming.
  */
 export class MasterTimetableService {
   private readonly httpClient: PlumwareHttpClient;
   private readonly cacheTtlSeconds: number;
+  private readonly staleTtlSeconds: number;
   private readonly cache = new Map<string, CachedTimetableEntry>();
 
   constructor(deps?: MasterTimetableServiceDependencies) {
     this.httpClient = deps?.httpClient || new PlumwareHttpClient();
-    // Default 7 days (604,800 seconds)
+    // Default 7 days (604,800 seconds) hard TTL
     this.cacheTtlSeconds = deps?.cacheTtlSeconds || 7 * 24 * 3600;
+    // Default 24 hours (86,400 seconds) soft SWR TTL
+    this.staleTtlSeconds = deps?.staleTtlSeconds || 24 * 3600;
   }
 
   /**
@@ -71,10 +77,23 @@ export class MasterTimetableService {
       section
     );
 
-    // 1. Check cache
+    // 1. Check cache (Stale-While-Revalidate semantics)
     const cached = this.cache.get(cacheKey);
-    if (cached && Date.now() < cached.expiresAt) {
-      logger.debug('TIMETABLE', `Cache HIT for ${cacheKey}`);
+    const now = Date.now();
+    if (cached && now < cached.expiresAt) {
+      if (now > cached.staleAfter) {
+        logger.info(
+          'TIMETABLE',
+          `SWR: Serving stale cached entry for ${cacheKey} and triggering background refresh`
+        );
+        void this.revalidateInBackground(
+          { academicYear, program, branch, semester, section },
+          cacheKey,
+          cookieJar
+        );
+      } else {
+        logger.debug('TIMETABLE', `Cache HIT for ${cacheKey}`);
+      }
       return {
         ...cached.timetable,
         isCached: true,
@@ -95,9 +114,10 @@ export class MasterTimetableService {
       cookieJar
     );
 
-    // 3. Store in cache with 7-day TTL
+    // 3. Store in cache with hard TTL and soft SWR TTL
     this.cache.set(cacheKey, {
       timetable,
+      staleAfter: Date.now() + this.staleTtlSeconds * 1000,
       expiresAt: Date.now() + this.cacheTtlSeconds * 1000,
     });
 
@@ -143,6 +163,7 @@ export class MasterTimetableService {
 
     this.cache.set(cacheKey, {
       timetable,
+      staleAfter: Date.now() + this.staleTtlSeconds * 1000,
       expiresAt: Date.now() + this.cacheTtlSeconds * 1000,
     });
 
@@ -150,6 +171,36 @@ export class MasterTimetableService {
       ...timetable,
       isCached: false,
     };
+  }
+
+  /**
+   * Asynchronous background revalidation for SWR cache hits.
+   */
+  private async revalidateInBackground(
+    params: {
+      academicYear: string;
+      program: string;
+      branch: string;
+      semester: number;
+      section: string;
+    },
+    cacheKey: string,
+    cookieJar?: CookieJar
+  ): Promise<void> {
+    try {
+      const fresh = await this.scrapeMasterTimetable(params, cookieJar);
+      this.cache.set(cacheKey, {
+        timetable: fresh,
+        staleAfter: Date.now() + this.staleTtlSeconds * 1000,
+        expiresAt: Date.now() + this.cacheTtlSeconds * 1000,
+      });
+      logger.info('TIMETABLE', `SWR: Background revalidation succeeded for ${cacheKey}`);
+    } catch (err: unknown) {
+      logger.warn(
+        'TIMETABLE',
+        `SWR: Background revalidation failed for ${cacheKey}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
   }
 
   /**
@@ -194,10 +245,29 @@ export class MasterTimetableService {
     semester: number;
     section: string;
   }): MasterSectionTimetable {
+    const prodResourcePath = path.resolve(
+      process.cwd(),
+      'src',
+      'resources',
+      'blueprints',
+      'master_timetable_csb.html'
+    );
+    const distResourcePath = path.resolve(
+      process.cwd(),
+      'dist',
+      'src',
+      'resources',
+      'blueprints',
+      'master_timetable_csb.html'
+    );
     const fixturePath = path.resolve(process.cwd(), 'tests', 'fixtures', 'master_timetable_csb.html');
     let html = '';
 
-    if (fs.existsSync(fixturePath)) {
+    if (fs.existsSync(prodResourcePath)) {
+      html = fs.readFileSync(prodResourcePath, 'utf-8');
+    } else if (fs.existsSync(distResourcePath)) {
+      html = fs.readFileSync(distResourcePath, 'utf-8');
+    } else if (fs.existsSync(fixturePath)) {
       html = fs.readFileSync(fixturePath, 'utf-8');
     } else {
       html = `

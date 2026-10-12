@@ -1,4 +1,5 @@
 import type { StudentAcademicInference } from '../types/timetable.js';
+import { UnrecognizedRollError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 
 interface BranchMetadata {
@@ -6,6 +7,10 @@ interface BranchMetadata {
   name: string;
   degree: string;
   sections: number;
+}
+
+export interface InferRollOptions {
+  strict?: boolean;
 }
 
 /**
@@ -22,7 +27,7 @@ export class TimetableInferenceService {
     CSB: { code: 'CSB', name: 'Computer Science & Business Systems', degree: 'B.Tech', sections: 1 },
     CS: { code: 'CSE', name: 'Computer Science & Engineering', degree: 'B.Tech', sections: 3 },
     CSE: { code: 'CSE', name: 'Computer Science & Engineering', degree: 'B.Tech', sections: 3 },
-    COE: { code: 'CSE', name: 'Computer Engineering', degree: 'B.Tech', sections: 3 },
+    COE: { code: 'COE', name: 'Computer Engineering', degree: 'B.Tech', sections: 3 },
     CA: { code: 'CSAI', name: 'Computer Science & Engineering (AI)', degree: 'B.Tech', sections: 2 },
     CSAI: { code: 'CSAI', name: 'Computer Science & Engineering (AI)', degree: 'B.Tech', sections: 2 },
     CI: { code: 'CSIOT', name: 'Computer Science & Engineering (IoT)', degree: 'B.Tech', sections: 1 },
@@ -72,7 +77,8 @@ export class TimetableInferenceService {
    */
   public static inferFromRollNumber(
     rawRollNo: string,
-    referenceDate = new Date()
+    referenceDate = new Date(),
+    options?: InferRollOptions
   ): StudentAcademicInference {
     const clean = rawRollNo.trim().toUpperCase().replace(/[\s\-_]/g, '');
 
@@ -80,9 +86,23 @@ export class TimetableInferenceService {
     const rollRegex = /^(\d{4})([UPD])([A-Z]{2,4})(\d{1,5})$/;
     const match = clean.match(rollRegex);
 
+    if (options?.strict && !match) {
+      throw new UnrecognizedRollError(
+        `Unrecognized student roll number format: "${rawRollNo}". Expected NSUT pattern: <YYYY><Level><Branch><Roll>.`,
+        { rollNo: rawRollNo }
+      );
+    }
+
     const admissionYear = match ? parseInt(match[1], 10) : referenceDate.getFullYear();
     const levelCode = match ? match[2] : 'U';
     const rawBranchCode = match ? match[3] : 'CSB';
+
+    if (options?.strict && !this.BRANCH_REGISTRY[rawBranchCode]) {
+      throw new UnrecognizedRollError(
+        `Unrecognized NSUT department or branch code: "${rawBranchCode}" in roll number "${rawRollNo}".`,
+        { branchCode: rawBranchCode, rollNo: rawRollNo }
+      );
+    }
 
     // Program resolution
     let program = 'B.Tech';
@@ -97,14 +117,16 @@ export class TimetableInferenceService {
       sections: 1,
     };
 
-    // Calculate Semester & Academic Year based on current temporal coordinates
-    const refYear = referenceDate.getFullYear();
-    const refMonth = referenceDate.getMonth(); // 0 = Jan, 7 = Aug, 9 = Oct
+    // Calculate Semester & Academic Year based on localized Indian Standard Time (IST) coordinates
+    // Prevents calendar boundary drift (Dec 31 -> Jan 1, June 30 -> July 1) in containerized UTC environments
+    const istDateStr = referenceDate.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
+    const istDate = new Date(istDateStr);
+    const refYear = istDate.getFullYear();
+    const refMonth = istDate.getMonth(); // 0 = Jan, 6 = July, 9 = Oct
 
     // Academic Semester Calendar:
-    // August to December (Months 7..11) = Odd Semester (Monsoon)
+    // July to December (Months 6..11) = Odd Semester (Monsoon)
     // January to June (Months 0..5)    = Even Semester (Winter)
-    // July (Month 6)                   = Transition / Odd Sem Prep
     const isOddTerm = refMonth >= 6; // July through December
     const isEvenSemester = !isOddTerm;
 

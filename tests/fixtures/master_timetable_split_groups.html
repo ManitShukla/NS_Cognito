@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Time Table - Split Groups & Elective Offerings</title>
+</head>
+<body>
+  <h2>Academic Session: 2026-27 | Program: B.Tech | Department: CSE | Semester: 5 | Section: 1</h2>
+  <table border="1" cellpadding="3" cellspacing="0" width="100%">
+    <thead>
+      <tr>
+        <th width="10%">Day / Period</th>
+        <th width="12%">09:00 - 10:00<br>P1</th>
+        <th width="12%">10:00 - 11:00<br>P2</th>
+        <th width="12%">11:00 - 12:00<br>P3</th>
+        <th width="12%">12:00 - 13:00<br>P4</th>
+        <th width="10%">13:00 - 14:00<br>Lunch</th>
+        <th width="12%">14:00 - 15:00<br>P5</th>
+        <th width="12%">15:00 - 16:00<br>P6</th>
+      </tr>
+    </thead>
+    <tbody>
+      <!-- MONDAY: Concurrent Split Lab G1 & G2 -->
+      <tr>
+        <td>Monday</td>
+        <td>CS301 (L)<br>LT-1<br>Prof. Alpha</td>
+        <td>CS303 (L)<br>LT-2<br>Prof. Gamma</td>
+        <td>MA301 (L)<br>LT-1<br>Dr. Delta</td>
+        <td>CS304 (L)<br>LT-2<br>Prof. Epsilon</td>
+        <td align="center">LUNCH</td>
+        <!-- 2-hour concurrent split practical lab -->
+        <td colspan="2">
+          G1: PH101 (P) [Physics Lab] (Dr. Raman)<br>
+          G2: EE101 (P) [Circuit Lab] (Dr. Sharma)
+        </td>
+      </tr>
+
+      <!-- TUESDAY: Elective choice slot occupying the exact same time slot (P1) -->
+      <tr>
+        <td>Tuesday</td>
+        <!-- Elective choices in identical slot -->
+        <td>CS311 (L) Room 101 (Prof. Cloud) / CS312 (L) Room 102 (Prof. Cyber)</td>
+        <td>CS303 (L)<br>LT-2<br>Prof. Gamma</td>
+        <td>MA301 (L)<br>LT-1<br>Dr. Delta</td>
+        <td>CS304 (L)<br>LT-2<br>Prof. Epsilon</td>
+        <td align="center">LUNCH</td>
+        <!-- G1 has DSA Lab, G2 has NO lab (-) -->
+        <td colspan="2">
+          G1: CS305 (P) [DSA Lab] (Dr. Rajesh)<br>
+          G2: -
+        </td>
+      </tr>
+
+      <!-- WEDNESDAY: Inverse free slot -->
+      <tr>
+        <td>Wednesday</td>
+        <td>CS301 (L)<br>LT-1<br>Prof. Alpha</td>
+        <td>CS304 (L)<br>LT-2<br>Prof. Epsilon</td>
+        <td>CS303 (L)<br>LT-2<br>Prof. Gamma</td>
+        <td>MA301 (L)<br>LT-1<br>Dr. Delta</td>
+        <td align="center">LUNCH</td>
+        <!-- G1 has NO lab (-), G2 has OOP Lab -->
+        <td colspan="2">
+          G1: -<br>
+          G2: CS306 (P) [OOP Lab] (Dr. Gupta)
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</body>
+</html>

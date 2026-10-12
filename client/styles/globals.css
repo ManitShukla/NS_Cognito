@@ -1,0 +1,211 @@
+@import "tailwindcss";
+
+@theme {
+  --color-co-black: #05070A;
+  --color-co-night: #071024;
+  --color-co-ink: #1A1A1A;
+  --color-co-paper: #FFFFFF;
+  --color-co-surface: #F2F2F2;
+  --color-co-blue: #0033A0;
+  --color-co-red: #D82C2C;
+  --color-co-muted: #697271;
+  --color-co-muted-strong: #66706F;
+  --color-co-dark-copy: #C8CECD;
+  --color-co-disabled: #8D9695;
+  --color-co-rule: #DFE3E3;
+  --color-co-dark-rule: #3B3B3B;
+
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+:root {
+  --co-black: #05070A;
+  --co-night: #071024;
+  --co-ink: #1A1A1A;
+  --co-paper: #FFFFFF;
+  --co-surface: #F2F2F2;
+  --co-blue: #0033A0;
+  --co-red: #D82C2C;
+  --co-muted: #697271;
+  --co-muted-strong: #66706F;
+  --co-dark-copy: #C8CECD;
+  --co-disabled: #8D9695;
+  --co-rule: #DFE3E3;
+  --co-dark-rule: #3B3B3B;
+}
+
+/* Global 0px Swiss geometry enforcement */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+/* Base body typography and smoothing */
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  background-color: var(--co-black);
+  color: var(--co-paper);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Cinematic lighting background recipe */
+.cinematic-backdrop {
+  background:
+    radial-gradient(circle at 50% 35%, rgba(0, 51, 160, 0.28), transparent 50%),
+    radial-gradient(circle at 50% 105%, rgba(0, 51, 160, 0.16), transparent 52%),
+    #05070A;
+}
+
+/* Dual-line hairline hover interaction */
+.hairline-dual {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  cursor: pointer;
+  padding-bottom: 3px;
+}
+
+.hairline-dual::before {
+  content: '';
+  position: absolute;
+  bottom: 1px;
+  left: 0;
+  width: 0%;
+  height: 1px;
+  background-color: currentColor;
+  transition: width 180ms ease-out;
+}
+
+.hairline-dual::after {
+  content: '';
+  position: absolute;
+  bottom: 0px;
+  right: 0;
+  width: 0%;
+  height: 1px;
+  background-color: #D82C2C;
+  transition: width 180ms ease-out;
+}
+
+.hairline-dual:hover::before {
+  width: 100%;
+}
+
+.hairline-dual:hover::after {
+  width: 100%;
+}
+
+.hairline-dual.active {
+  border-bottom: 2px solid #D82C2C;
+  padding-bottom: 1px;
+}
+
+.hairline-dual.active::before,
+.hairline-dual.active::after {
+  display: none;
+}
+
+/* Viewfinder corner brackets - Exact 4px tick mark specification */
+.viewfinder-card {
+  position: relative;
+}
+
+.viewfinder-corner-tl,
+.viewfinder-corner-tr,
+.viewfinder-corner-bl,
+.viewfinder-corner-br {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  pointer-events: none;
+}
+
+.viewfinder-corner-tl {
+  top: 0;
+  left: 0;
+  border-top: 1px solid currentColor;
+  border-left: 1px solid currentColor;
+}
+
+.viewfinder-corner-tr {
+  top: 0;
+  right: 0;
+  border-top: 1px solid currentColor;
+  border-right: 1px solid currentColor;
+}
+
+.viewfinder-corner-bl {
+  bottom: 0;
+  left: 0;
+  border-bottom: 1px solid currentColor;
+  border-left: 1px solid currentColor;
+}
+
+.viewfinder-corner-br {
+  bottom: 0;
+  right: 0;
+  border-bottom: 1px solid currentColor;
+  border-right: 1px solid currentColor;
+}
+
+/* Technical Monospace Micro-badges */
+.mono-stamp {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.75rem;
+}
+
+/* Sharp focus ring for form inputs (only place 2px radius is permitted) */
+.input-swiss {
+  border-radius: 2px;
+  transition: border-color 160ms ease-out, box-shadow 160ms ease-out;
+}
+
+.input-swiss:focus {
+  outline: none;
+  border-color: #0033A0;
+  box-shadow: 0 0 0 1px #0033A0;
+}
+
+/* Keyboard focus navigation indicator for accessibility */
+button:focus-visible,
+a:focus-visible,
+select:focus-visible {
+  outline: 2px solid #0033A0 !important;
+  outline-offset: 2px !important;
+}
+
+/* Editorial Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #05070A;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3B3B3B;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #697271;
+}
+
+/* Vestibular safety and accessibility */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

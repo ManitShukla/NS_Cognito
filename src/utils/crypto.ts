@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from 'crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'crypto';
 import { env } from '../config/env.js';
 
 // Ephemeral cryptographic secret for signing transient tokens
@@ -20,6 +20,7 @@ export function generateSignedSessionToken(): string {
 
 /**
  * Validates the cryptographic integrity of a signed session token.
+ * Uses timingSafeEqual to prevent side-channel timing attacks.
  * In development / test mode, permits standard UUIDv4 as well for backwards compatibility.
  */
 export function verifySessionTokenSignature(token: string): boolean {
@@ -44,5 +45,12 @@ export function verifySessionTokenSignature(token: string): boolean {
     .digest('hex')
     .slice(0, 16);
 
-  return signature === expectedSignature;
+  const signatureBuffer = Buffer.from(signature, 'utf-8');
+  const expectedBuffer = Buffer.from(expectedSignature, 'utf-8');
+
+  if (signatureBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+
+  return timingSafeEqual(signatureBuffer, expectedBuffer);
 }

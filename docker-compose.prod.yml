@@ -1,0 +1,112 @@
+version: '3.8'
+
+# ==============================================================================
+# NS COGNITO — PRODUCTION CONTAINER ORCHESTRATION MANIFEST
+# Academic Coprocessor & High-Density Telemetry Engine for NSUT
+# ==============================================================================
+
+networks:
+  cognito-network:
+    driver: bridge
+
+services:
+  # ----------------------------------------------------------------------------
+  # Ephemeral In-Memory Session Cache (Zero-Persistence Policy)
+  # ----------------------------------------------------------------------------
+  cognito-redis:
+    image: redis:7-alpine
+    container_name: cognito-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - cognito-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 256M
+        reservations:
+          cpus: '0.10'
+          memory: 64M
+
+  # ----------------------------------------------------------------------------
+  # Core Scraper, Inference & Telemetry Backend API
+  # ----------------------------------------------------------------------------
+  cognito-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cognito-api
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - SESSION_STORE=redis
+      - REDIS_URL=redis://cognito-redis:6379
+      - SESSION_SECRET=${SESSION_SECRET:-COGNITO_SECURE_HMAC_PROD_SECRET_KEY_MUST_BE_32_BYTES}
+      - SESSION_TTL_SECONDS=180
+      - PLUMWARE_BASE_URL=https://imsnsit.org
+      - PLUMWARE_TIMEOUT_MS=12000
+      - PLUMWARE_MAX_RETRIES=2
+    depends_on:
+      cognito-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - cognito-network
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # ----------------------------------------------------------------------------
+  # Edge Gateway & Static Content Delivery (Nginx)
+  # ----------------------------------------------------------------------------
+  cognito-web:
+    image: nginx:1.27-alpine
+    container_name: cognito-web
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./dist/client:/usr/share/nginx/html:ro
+    depends_on:
+      cognito-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:80/health/live"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    networks:
+      - cognito-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 128M
+        reservations:
+          cpus: '0.05'
+          memory: 32M

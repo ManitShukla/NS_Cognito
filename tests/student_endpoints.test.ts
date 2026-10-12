@@ -103,7 +103,7 @@ describe('Student Telemetry API Endpoints Integration', () => {
         .set('x-session-token', testToken);
 
       expect(res.status).toBe(502);
-      expect(res.body.code).toBe('PLUMWARE_TRIPWIRE');
+      expect(['PLUMWARE_TRIPWIRE', 'PORTAL_DESYNC_DETECTED']).toContain(res.body.code);
 
       // Verify session was actively purged from memory store
       const sessionInStore = await context.sessionStore.get(testToken);

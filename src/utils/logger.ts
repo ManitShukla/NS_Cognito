@@ -1,4 +1,5 @@
 import { env } from '../config/env.js';
+import { sanitizeLogPayload } from '../middleware/payload_sanitizer.js';
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -18,25 +19,29 @@ function formatTimestamp(): string {
 export const logger = {
   debug(tag: string, message: string, meta?: unknown) {
     if (LEVEL_SEVERITY.debug >= currentLevelSeverity) {
-      console.debug(`[${formatTimestamp()}] [DEBUG // ${tag}] ${message}`, meta !== undefined ? meta : '');
+      const sanitizedMeta = meta !== undefined ? sanitizeLogPayload(meta) : '';
+      console.debug(`[${formatTimestamp()}] [DEBUG // ${tag}] ${message}`, sanitizedMeta);
     }
   },
 
   info(tag: string, message: string, meta?: unknown) {
     if (LEVEL_SEVERITY.info >= currentLevelSeverity) {
-      console.log(`[${formatTimestamp()}] [TEL // ${tag}] ${message}`, meta !== undefined ? meta : '');
+      const sanitizedMeta = meta !== undefined ? sanitizeLogPayload(meta) : '';
+      console.log(`[${formatTimestamp()}] [TEL // ${tag}] ${message}`, sanitizedMeta);
     }
   },
 
   warn(tag: string, message: string, meta?: unknown) {
     if (LEVEL_SEVERITY.warn >= currentLevelSeverity) {
-      console.warn(`[${formatTimestamp()}] [WARN // ${tag}] ${message}`, meta !== undefined ? meta : '');
+      const sanitizedMeta = meta !== undefined ? sanitizeLogPayload(meta) : '';
+      console.warn(`[${formatTimestamp()}] [WARN // ${tag}] ${message}`, sanitizedMeta);
     }
   },
 
   error(tag: string, message: string, meta?: unknown) {
     if (LEVEL_SEVERITY.error >= currentLevelSeverity) {
-      console.error(`[${formatTimestamp()}] [ERR // ${tag}] ${message}`, meta !== undefined ? meta : '');
+      const sanitizedMeta = meta !== undefined ? sanitizeLogPayload(meta) : '';
+      console.error(`[${formatTimestamp()}] [ERR // ${tag}] ${message}`, sanitizedMeta);
     }
   },
 };

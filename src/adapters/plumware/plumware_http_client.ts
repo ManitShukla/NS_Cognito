@@ -4,6 +4,7 @@ import type { CookieJar } from 'tough-cookie';
 import { env } from '../../config/env.js';
 import { logger } from '../../utils/logger.js';
 import { PlumwareDownError } from '../../utils/errors.js';
+import { upstreamTrafficGate } from './upstream_traffic_gate.js';
 
 export interface HttpClientOptions {
   baseURL?: string;
@@ -68,7 +69,7 @@ export class PlumwareHttpClient {
 
     while (attempt <= this.maxRetries) {
       try {
-        return await fn();
+        return await upstreamTrafficGate.execute(operationName, fn);
       } catch (err: unknown) {
         attempt++;
         const isNetworkOrTimeout =
