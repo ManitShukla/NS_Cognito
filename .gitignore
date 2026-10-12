@@ -28,3 +28,7 @@ Thumbs.db
 
 #docs
 docs/
+
+# Diagnostic Sandbox
+sandbox_portal_tester/
+
