@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <h3>TIME TABLE - IRREGULAR SPANS & MULTI-ROW BLOCKS</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Day</th>
+        <th>09:00 - 10:00</th>
+        <th>10:00 - 11:00</th>
+        <th>11:00 - 12:00</th>
+        <th>12:00 - 13:00</th>
+        <th>13:00 - 14:00</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Monday</td>
+        <!-- 2-hour slot with colspan="2" -->
+        <td colspan="2">CS101 (L) Room 101 Prof. A</td>
+        <td>CS102 (L) Room 102 Prof. B</td>
+        <td>CS103 (L) Room 103 Prof. C</td>
+        <!-- 2-day lunch with rowspan="2" -->
+        <td rowspan="2">LUNCH</td>
+      </tr>
+      <tr>
+        <td>Tuesday</td>
+        <td>CS102 (L) Room 102 Prof. B</td>
+        <td colspan="2">G1: CS101 (P) Lab 1 / G2: CS104 (P) Lab 2</td>
+        <td>CS101 (L) Room 101 Prof. A</td>
+        <!-- Cell 5 occupied by Monday's rowspan -->
+      </tr>
+      <tr>
+        <td>Wednesday</td>
+        <td colspan="3">WORKSHOP (P) All Mechanical Shop (Prof. Mechanix)</td>
+        <td>CS103 (L) Room 103 Prof. C</td>
+        <td>LUNCH</td>
+      </tr>
+    </tbody>
+  </table>
+</body>
+</html>

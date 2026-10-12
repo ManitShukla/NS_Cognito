@@ -1,0 +1,49 @@
+{
+  "name": "ns-cognito",
+  "version": "1.0.0",
+  "description": "NS Cognito — Academic Coprocessor & High-Density Telemetry Engine for NSUT",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/src/index.js",
+    "dev": "tsx watch src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:handshake": "tsx scripts/test_auth_handshake.ts",
+    "test:academic": "tsx scripts/test_academic_engine.ts"
+  },
+  "keywords": [
+    "nsut",
+    "plumware",
+    "attendance",
+    "timetable",
+    "telemetry",
+    "swiss-editorial"
+  ],
+  "author": "NS Cognito Core Engineering Team",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.20.0",
+    "axios-cookiejar-support": "^7.0.0",
+    "cheerio": "^1.2.0",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.7",
+    "express": "^5.3.0",
+    "helmet": "^8.3.0",
+    "tough-cookie": "^6.0.2",
+    "uuid": "^14.0.3",
+    "zod": "^4.6.6"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.5",
+    "@types/supertest": "^7.2.1",
+    "@types/tough-cookie": "^4.0.5",
+    "supertest": "^7.3.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}
