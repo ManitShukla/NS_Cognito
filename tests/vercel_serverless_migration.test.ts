@@ -33,7 +33,13 @@ describe('Vercel Serverless Deployment & Runtime Adaptation Test Suite', () => {
       expect(fnConfig).toBeDefined();
       expect(fnConfig.memory).toBe(1024);
       expect(fnConfig.maxDuration).toBe(15);
-      expect(fnConfig.runtime).toBe('nodejs20.x');
+      // runtime property in functions must be omitted in modern Vercel to avoid CLI validation error
+      expect(fnConfig.runtime).toBeUndefined();
+
+      // Node runtime version is enforced via package.json engines
+      const pkg = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf-8'));
+      expect(pkg.engines?.node).toBeDefined();
+      expect(pkg.engines.node).toContain('20');
     });
 
     it('verifies strict production security and caching headers', () => {

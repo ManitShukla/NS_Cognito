@@ -61,7 +61,7 @@ All process-bound Node.js dependencies (`app.listen()`, persistent worker interv
 
 ### 3.1. Serverless Routing & Project Topology (`vercel.json`)
 * **Framework:** Configured as `vite` with `outputDirectory: "dist/client"`.
-* **Serverless Function Target:** `api/index.ts` mapped with `maxDuration: 15`, `memory: 1024`, and `runtime: "nodejs20.x"`.
+* **Serverless Function Target:** `api/index.ts` mapped with `maxDuration: 15` and `memory: 1024`. (Note: Node.js runtime version is set via `package.json` `"engines": { "node": ">=20.0.0" }`, avoiding legacy `functions.runtime` version errors in Vercel CLI).
 * **SPA Fallback Routing:** Non-API requests (`/`, `/login`, `/dashboard`, `/explorer`) route to `/index.html` allowing React Router client navigation on page reload.
 * **Security Headers:**
   * `X-Frame-Options: DENY`

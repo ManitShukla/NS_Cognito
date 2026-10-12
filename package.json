@@ -4,6 +4,9 @@
   "description": "NS Cognito — Academic Coprocessor & High-Density Telemetry Engine for NSUT",
   "type": "module",
   "main": "dist/src/index.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "build:client": "vite build --outDir dist/client",
     "build:server": "tsc",
