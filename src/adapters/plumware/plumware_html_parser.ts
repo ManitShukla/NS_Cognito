@@ -156,10 +156,47 @@ export class PlumwareHtmlParser {
     _httpStatus: number,
     locationHeader?: string
   ): LoginClassificationResult {
-    const lowerHtml = html.toLowerCase();
-    const targetUrl = locationHeader || '';
+    const lowerHtml = (html || '').toLowerCase();
+    const targetUrl = (locationHeader || '').toLowerCase();
 
-    // 1. CAPTCHA Mismatch Checks
+    // 1. Inspect location header (HTTP 302 redirects)
+    if (targetUrl) {
+      const successUrlPatterns = [
+        'student_index',
+        'student.htm',
+        'student_home',
+        'plum_menu',
+        'middle_frame',
+        'student_view',
+      ];
+      const hasSuccessRedirect = successUrlPatterns.some((pattern) => targetUrl.includes(pattern));
+
+      if (hasSuccessRedirect) {
+        return {
+          type: 'SUCCESS',
+          targetUrl: locationHeader,
+        };
+      }
+
+      if (targetUrl.includes('plum5_fw_login.php')) {
+        if (
+          lowerHtml.includes('invalid security number') ||
+          lowerHtml.includes('invalid security code') ||
+          lowerHtml.includes('please enter captcha')
+        ) {
+          return {
+            type: 'INVALID_CAPTCHA',
+            reason: 'Plumware rejected the provided security code (CAPTCHA mismatch).',
+          };
+        }
+        return {
+          type: 'INVALID_CREDENTIALS',
+          reason: 'Login failed with redirect back to login surface.',
+        };
+      }
+    }
+
+    // 2. CAPTCHA Mismatch Checks
     if (
       lowerHtml.includes('invalid security number') ||
       lowerHtml.includes('invalid security code') ||
@@ -171,7 +208,7 @@ export class PlumwareHtmlParser {
       };
     }
 
-    // 2. Credential Mismatch Checks
+    // 3. Credential Mismatch Checks
     if (
       lowerHtml.includes('invalid login') ||
       lowerHtml.includes('invalid userid') ||
@@ -184,7 +221,7 @@ export class PlumwareHtmlParser {
       };
     }
 
-    // 3. Security Traps & Access Denied Checks
+    // 4. Security Traps & Access Denied Checks
     if (
       lowerHtml.includes('access denied') ||
       lowerHtml.includes('invalid attempt') ||
@@ -196,29 +233,17 @@ export class PlumwareHtmlParser {
       };
     }
 
-    // 4. Success Indicators:
-    // If redirected to an authenticated dashboard frame or contains student menus
-    const successUrlPatterns = ['student_index', 'student_home', 'plum_menu', 'middle_frame', 'student_view'];
-    const hasSuccessRedirect = successUrlPatterns.some((pattern) => targetUrl.toLowerCase().includes(pattern));
-
+    // 5. Success Indicators (HTTP 200 or frameset renders)
     if (
-      hasSuccessRedirect ||
-      lowerHtml.includes('student_menu') ||
+      lowerHtml.includes('welcome :') ||
       lowerHtml.includes('welcome to student') ||
+      lowerHtml.includes('student_menu') ||
       lowerHtml.includes('logout.php') ||
       lowerHtml.includes('current sem courses registered')
     ) {
       return {
         type: 'SUCCESS',
-        targetUrl,
-      };
-    }
-
-    // If redirected back to plum5_fw_login.php?uid= without error text, it might still have an error message on the rendered page
-    if (targetUrl.includes('plum5_fw_login.php?uid=')) {
-      return {
-        type: 'INVALID_CREDENTIALS',
-        reason: 'Login failed with redirect back to login surface.',
+        targetUrl: locationHeader,
       };
     }
 

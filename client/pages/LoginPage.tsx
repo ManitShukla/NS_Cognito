@@ -18,10 +18,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onCancel }
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<{ code: string; message: string } | null>(null);
 
+  const captchaInputRef = React.useRef<HTMLInputElement>(null);
+
   // Initialize session and fetch fresh CAPTCHA challenge
-  const initHandshake = useCallback(async (): Promise<SessionInitData | null> => {
+  const initHandshake = useCallback(async (preserveError = false): Promise<SessionInitData | null> => {
     setIsLoadingSession(true);
-    setErrorMessage(null);
+    if (!preserveError) {
+      setErrorMessage(null);
+    }
     try {
       const data = await apiClient.initSession();
       setSessionData(data);
@@ -29,17 +33,19 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onCancel }
       setCaptchaText('');
       return data;
     } catch (err) {
-      if (err instanceof ApiError) {
-        setErrorMessage({
-          code: err.code,
-          message: err.message,
-        });
-      } else {
-        const msg = err instanceof Error ? err.message : 'Unable to establish secure handshake with Plumware proxy gateway.';
-        setErrorMessage({
-          code: 'HANDSHAKE_ERROR',
-          message: msg,
-        });
+      if (!preserveError) {
+        if (err instanceof ApiError) {
+          setErrorMessage({
+            code: err.code,
+            message: err.message,
+          });
+        } else {
+          const msg = err instanceof Error ? err.message : 'Unable to establish secure handshake with Plumware proxy gateway.';
+          setErrorMessage({
+            code: 'HANDSHAKE_ERROR',
+            message: msg,
+          });
+        }
       }
       return null;
     } finally {
@@ -159,40 +165,65 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onCancel }
       // Immediately route to dashboard
       onLoginSuccess(loginData);
     } catch (err: unknown) {
-      // Map domain rejections to structured, readable user feedback
+      // Step 4: Map domain rejections to explicit monospaced telemetry alerts
+      let errCode = 'AUTH_FAILED';
+      let errText = 'Invalid credentials or CAPTCHA mismatch. Please re-enter CAPTCHA.';
+
       if (err instanceof ApiError) {
-        if (err.code === 'INVALID_CAPTCHA') {
-          setErrorMessage({
-            code: 'INVALID_CAPTCHA',
-            message: 'Security code mismatch. Refreshing challenge...',
-          });
-        } else if (err.code === 'INVALID_CREDENTIALS') {
-          setErrorMessage({
-            code: 'INVALID_CREDENTIALS',
-            message: 'University portal rejected Roll Number or Password.',
-          });
-        } else if (err.code === 'UPSTREAM_TIMEOUT' || err.code === 'GATEWAY_TIMEOUT') {
-          setErrorMessage({
-            code: 'GATEWAY_TIMEOUT',
-            message: 'Upstream university portal is unresponsive. Please retry.',
-          });
+        if (
+          err.status === 502 ||
+          err.code === 'HTTP_502' ||
+          err.code === 'PLUMWARE_TRIPWIRE' ||
+          err.code === 'PLUMWARE_UNAVAILABLE'
+        ) {
+          errCode = 'GATEWAY_ERROR';
+          errText = 'Plumware portal was slow to respond. Please try again.';
+        } else if (
+          err.status === 504 ||
+          err.code === 'HTTP_504' ||
+          err.code === 'UPSTREAM_TIMEOUT' ||
+          err.code === 'GATEWAY_TIMEOUT'
+        ) {
+          errCode = 'GATEWAY_ERROR';
+          errText = 'Plumware portal was slow to respond. Please try again.';
+        } else if (
+          err.status === 401 ||
+          err.code === 'INVALID_CREDENTIALS' ||
+          err.code === 'INVALID_CAPTCHA' ||
+          err.code === 'HTTP_401' ||
+          err.code === 'HTTP_400'
+        ) {
+          errCode = 'AUTH_FAILED';
+          errText = 'Invalid credentials or CAPTCHA mismatch. Please re-enter CAPTCHA.';
         } else {
-          setErrorMessage({
-            code: err.code || 'AUTH_GATEWAY_ERROR',
-            message: err.message || 'Authentication rejected by Plumware gateway.',
-          });
+          errCode = 'AUTH_FAILED';
+          errText = err.message || 'Invalid credentials or CAPTCHA mismatch. Please re-enter CAPTCHA.';
         }
-      } else {
-        const fallbackMsg = err instanceof Error ? err.message : 'Authentication failed due to upstream proxy or network error.';
-        setErrorMessage({
-          code: 'AUTH_GATEWAY_ERROR',
-          message: fallbackMsg,
-        });
+      } else if (err instanceof Error) {
+        if (err.message.includes('502') || err.message.includes('504') || err.message.toLowerCase().includes('timeout')) {
+          errCode = 'GATEWAY_ERROR';
+          errText = 'Plumware portal was slow to respond. Please try again.';
+        } else {
+          errCode = 'AUTH_FAILED';
+          errText = 'Invalid credentials or CAPTCHA mismatch. Please re-enter CAPTCHA.';
+        }
       }
 
-      // Automatically refresh CAPTCHA challenge after rejection
+      setErrorMessage({
+        code: errCode,
+        message: errText,
+      });
+
+      // Clear ONLY the CAPTCHA text box; keep Roll Number and Password preserved
       setCaptchaText('');
-      handleRefreshCaptcha();
+
+      // Directly initialize fresh session without calling refreshCaptcha (which causes 410)
+      await initHandshake(true);
+
+      // Set focus back to the CAPTCHA input
+      setTimeout(() => {
+        captchaInputRef.current?.focus();
+      }, 50);
     } finally {
       setIsSubmitting(false);
     }
@@ -348,6 +379,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onCancel }
                   <KeyRound className="w-4 h-4" />
                 </div>
                 <input
+                  ref={captchaInputRef}
                   type="text"
                   value={captchaText}
                   onChange={(e) => setCaptchaText(e.target.value)}

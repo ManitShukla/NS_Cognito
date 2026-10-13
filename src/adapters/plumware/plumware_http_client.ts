@@ -258,24 +258,39 @@ export class PlumwareHttpClient {
 
   /**
    * Submits student login credentials and CAPTCHA challenge via form POST.
+   * Enforces maxRedirects: 0 and validateStatus < 400 to intercept 302 Found redirects.
    */
   async submitLogin(
     jar: CookieJar,
-    formData: Record<string, string>
+    formData: URLSearchParams | Record<string, string> | string,
+    phpsessid?: string
   ): Promise<{ html: string; statusCode: number; location?: string }> {
     const client = this.createSessionClient(jar);
-    const formParams = new URLSearchParams(formData).toString();
+    const bodyString =
+      formData instanceof URLSearchParams
+        ? formData.toString()
+        : typeof formData === 'string'
+        ? formData
+        : new URLSearchParams(formData).toString();
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Referer: `${this.baseURL}/plum5_fw_login.php`,
+      Origin: 'https://www.imsnsit.org',
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'Upgrade-Insecure-Requests': '1',
+    };
+
+    if (phpsessid) {
+      headers['Cookie'] = `PHPSESSID=${phpsessid}`;
+    }
 
     const response = await this.executeWithRetry<string>('submitLogin', () =>
-      client.post('/plum5_fw_login.php', formParams, {
+      client.post('/plum5_fw_login.php', bodyString, {
         maxRedirects: 0,
         validateStatus: (status: number) => status >= 200 && status < 400,
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          Referer: `${this.baseURL}/plum5_fw_login.php`,
-          Origin: 'https://www.imsnsit.org',
-          'Upgrade-Insecure-Requests': '1',
-        },
+        headers,
       })
     );
 

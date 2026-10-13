@@ -600,21 +600,27 @@ var init_plumware_http_client = __esm({
       }
       /**
        * Submits student login credentials and CAPTCHA challenge via form POST.
+       * Enforces maxRedirects: 0 and validateStatus < 400 to intercept 302 Found redirects.
        */
-      async submitLogin(jar, formData) {
+      async submitLogin(jar, formData, phpsessid) {
         const client = this.createSessionClient(jar);
-        const formParams = new URLSearchParams(formData).toString();
+        const bodyString = formData instanceof URLSearchParams ? formData.toString() : typeof formData === "string" ? formData : new URLSearchParams(formData).toString();
+        const headers = {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Referer: `${this.baseURL}/plum5_fw_login.php`,
+          Origin: "https://www.imsnsit.org",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "Upgrade-Insecure-Requests": "1"
+        };
+        if (phpsessid) {
+          headers["Cookie"] = `PHPSESSID=${phpsessid}`;
+        }
         const response = await this.executeWithRetry(
           "submitLogin",
-          () => client.post("/plum5_fw_login.php", formParams, {
+          () => client.post("/plum5_fw_login.php", bodyString, {
             maxRedirects: 0,
             validateStatus: (status) => status >= 200 && status < 400,
-            headers: {
-              "Content-Type": "application/x-www-form-urlencoded",
-              Referer: `${this.baseURL}/plum5_fw_login.php`,
-              Origin: "https://www.imsnsit.org",
-              "Upgrade-Insecure-Requests": "1"
-            }
+            headers
           })
         );
         return {
@@ -1430,16 +1436,88 @@ import { z as z2 } from "zod";
 
 // src/utils/crypto.ts
 init_env();
-import { createHmac, randomUUID, timingSafeEqual } from "crypto";
-var HMAC_SECRET = process.env.SESSION_SECRET || "ns-cognito-ephemeral-hmac-salt-2026";
-function generateSignedSessionToken() {
-  const rawId = randomUUID();
-  const signature = createHmac("sha256", HMAC_SECRET).update(rawId).digest("hex").slice(0, 16);
-  return `${rawId}.${signature}`;
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "crypto";
+var SECRET = process.env.SESSION_SECRET || "ns_cognito_fallback_secret_key_32_bytes!";
+var CIPHER_KEY = createHash("sha256").update(SECRET).digest();
+var HMAC_SECRET = SECRET;
+function encodeStatelessSessionToken(payload) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", CIPHER_KEY, iv);
+  const serialized = JSON.stringify(payload);
+  const encrypted = Buffer.concat([cipher.update(serialized, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return [
+    "s",
+    iv.toString("base64url"),
+    encrypted.toString("base64url"),
+    tag.toString("base64url")
+  ].join(".");
+}
+function decodeStatelessSessionToken(token) {
+  if (!token || typeof token !== "string") return null;
+  const parts = token.split(".");
+  const isPrefixed = parts.length === 4 && parts[0] === "s";
+  const isDirect = parts.length === 3;
+  if (!isPrefixed && !isDirect) return null;
+  try {
+    const ivB64 = isPrefixed ? parts[1] : parts[0];
+    const encB64 = isPrefixed ? parts[2] : parts[1];
+    const tagB64 = isPrefixed ? parts[3] : parts[2];
+    const iv = Buffer.from(ivB64, "base64url");
+    const enc = Buffer.from(encB64, "base64url");
+    const tag = Buffer.from(tagB64, "base64url");
+    if (iv.length !== 12 || tag.length !== 16) return null;
+    const decipher = createDecipheriv("aes-256-gcm", CIPHER_KEY, iv);
+    decipher.setAuthTag(tag);
+    const decrypted = Buffer.concat([decipher.update(enc), decipher.final()]);
+    const parsed2 = JSON.parse(decrypted.toString("utf8"));
+    if (!parsed2 || typeof parsed2.createdAt !== "number") return null;
+    return parsed2;
+  } catch {
+    return null;
+  }
+}
+function encodeAuthenticatedToken(payload) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", CIPHER_KEY, iv);
+  const serialized = JSON.stringify(payload);
+  const encrypted = Buffer.concat([cipher.update(serialized, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return [
+    "a",
+    iv.toString("base64url"),
+    encrypted.toString("base64url"),
+    tag.toString("base64url")
+  ].join(".");
+}
+function decodeAuthenticatedToken(token) {
+  if (!token || typeof token !== "string") return null;
+  const parts = token.split(".");
+  if (parts.length !== 4 || parts[0] !== "a") return null;
+  try {
+    const iv = Buffer.from(parts[1], "base64url");
+    const enc = Buffer.from(parts[2], "base64url");
+    const tag = Buffer.from(parts[3], "base64url");
+    if (iv.length !== 12 || tag.length !== 16) return null;
+    const decipher = createDecipheriv("aes-256-gcm", CIPHER_KEY, iv);
+    decipher.setAuthTag(tag);
+    const decrypted = Buffer.concat([decipher.update(enc), decipher.final()]);
+    const parsed2 = JSON.parse(decrypted.toString("utf8"));
+    if (!parsed2 || parsed2.type !== "authenticated") return null;
+    return parsed2;
+  } catch {
+    return null;
+  }
 }
 function verifySessionTokenSignature(token) {
   if (!token || typeof token !== "string") {
     return false;
+  }
+  if (decodeStatelessSessionToken(token) !== null) {
+    return true;
+  }
+  if (decodeAuthenticatedToken(token) !== null) {
+    return true;
   }
   const parts = token.split(".");
   if (parts.length === 1) {
@@ -2687,8 +2765,37 @@ var PlumwareHtmlParser = class {
    * Classifies a login response into one of the canonical domain outcomes.
    */
   static classifyLoginResponse(html, _httpStatus, locationHeader) {
-    const lowerHtml = html.toLowerCase();
-    const targetUrl = locationHeader || "";
+    const lowerHtml = (html || "").toLowerCase();
+    const targetUrl = (locationHeader || "").toLowerCase();
+    if (targetUrl) {
+      const successUrlPatterns = [
+        "student_index",
+        "student.htm",
+        "student_home",
+        "plum_menu",
+        "middle_frame",
+        "student_view"
+      ];
+      const hasSuccessRedirect = successUrlPatterns.some((pattern) => targetUrl.includes(pattern));
+      if (hasSuccessRedirect) {
+        return {
+          type: "SUCCESS",
+          targetUrl: locationHeader
+        };
+      }
+      if (targetUrl.includes("plum5_fw_login.php")) {
+        if (lowerHtml.includes("invalid security number") || lowerHtml.includes("invalid security code") || lowerHtml.includes("please enter captcha")) {
+          return {
+            type: "INVALID_CAPTCHA",
+            reason: "Plumware rejected the provided security code (CAPTCHA mismatch)."
+          };
+        }
+        return {
+          type: "INVALID_CREDENTIALS",
+          reason: "Login failed with redirect back to login surface."
+        };
+      }
+    }
     if (lowerHtml.includes("invalid security number") || lowerHtml.includes("invalid security code") || lowerHtml.includes("please enter captcha")) {
       return {
         type: "INVALID_CAPTCHA",
@@ -2707,18 +2814,10 @@ var PlumwareHtmlParser = class {
         reason: "Plumware security tripwire activated (Access Denied / Invalid Attempt)."
       };
     }
-    const successUrlPatterns = ["student_index", "student_home", "plum_menu", "middle_frame", "student_view"];
-    const hasSuccessRedirect = successUrlPatterns.some((pattern) => targetUrl.toLowerCase().includes(pattern));
-    if (hasSuccessRedirect || lowerHtml.includes("student_menu") || lowerHtml.includes("welcome to student") || lowerHtml.includes("logout.php") || lowerHtml.includes("current sem courses registered")) {
+    if (lowerHtml.includes("welcome :") || lowerHtml.includes("welcome to student") || lowerHtml.includes("student_menu") || lowerHtml.includes("logout.php") || lowerHtml.includes("current sem courses registered")) {
       return {
         type: "SUCCESS",
-        targetUrl
-      };
-    }
-    if (targetUrl.includes("plum5_fw_login.php?uid=")) {
-      return {
-        type: "INVALID_CREDENTIALS",
-        reason: "Login failed with redirect back to login surface."
+        targetUrl: locationHeader
       };
     }
     return {
@@ -2741,18 +2840,41 @@ var SessionEngineService = class {
   }
   /**
    * Initializes a brand-new, isolated Plumware session lifecycle.
-   * Fetches upstream tokens, binds the exact CAPTCHA buffer, and caches session state.
+   * Fetches upstream tokens, binds the exact CAPTCHA buffer, and generates a self-contained
+   * stateless token capable of crossing serverless Lambda container boundaries.
    */
   async initializeSession() {
-    const sessionToken = generateSignedSessionToken();
     const cookieJar = new CookieJar();
     const createdAt = Date.now();
-    logger.info("AUTH", `Initializing session ${sessionToken.slice(0, 8)}...`);
     const { html } = await this.httpClient.fetchLoginPage(cookieJar);
+    let phpsessid = "";
+    try {
+      const cookies = await cookieJar.getCookies(env.PLUMWARE_BASE_URL);
+      const found = cookies.find((c) => c.key.toLowerCase() === "phpsessid");
+      if (found) {
+        phpsessid = found.value;
+      } else {
+        const rootCookies = await cookieJar.getCookies("https://www.imsnsit.org");
+        const rootFound = rootCookies.find((c) => c.key.toLowerCase() === "phpsessid");
+        if (rootFound) phpsessid = rootFound.value;
+      }
+    } catch {
+    }
     const parsedForm = PlumwareHtmlParser.parseLoginForm(html);
     logger.debug("AUTH", `Extracted form tokens: fy=${parsedForm.fy}, captcha=${parsedForm.captchaPath}`);
     const captchaBuffer = await this.httpClient.fetchCaptchaBuffer(cookieJar, parsedForm.captchaPath);
     const captchaBase64 = `data:image/jpeg;base64,${captchaBuffer.toString("base64")}`;
+    const sessionPayload = {
+      phpsessid,
+      enc_fy: parsedForm.encFy,
+      HRAND_NUM: parsedForm.hrandNum,
+      comp: parsedForm.comp,
+      fy: parsedForm.fy,
+      t: parsedForm.t,
+      f: parsedForm.f || "",
+      createdAt
+    };
+    const sessionToken = encodeStatelessSessionToken(sessionPayload);
     const sessionState = {
       sessionToken,
       cookieJar,
@@ -2770,7 +2892,7 @@ var SessionEngineService = class {
     await this.sessionStore.set(sessionToken, sessionState, env.SESSION_TTL_SECONDS);
     logger.info(
       "AUTH",
-      `Session ${sessionToken.slice(0, 8)}... primed (TTL: ${env.SESSION_TTL_SECONDS}s, CAPTCHA: ${captchaBuffer.length} bytes)`
+      `Session ${sessionToken.slice(0, 10)}... primed (TTL: ${env.SESSION_TTL_SECONDS}s, CAPTCHA: ${captchaBuffer.length} bytes)`
     );
     return {
       sessionToken,
@@ -2781,15 +2903,45 @@ var SessionEngineService = class {
     };
   }
   /**
-   * Refreshes the CAPTCHA image for an existing unauthenticated session
-   * without requiring re-initialization of the whole session.
+   * Refreshes the CAPTCHA image for an existing unauthenticated session.
+   * Rehydrates stateless token if store miss occurs across serverless lambdas.
    */
   async refreshCaptcha(sessionToken) {
-    const session = await this.sessionStore.get(sessionToken);
+    let session = await this.sessionStore.get(sessionToken);
+    let statelessPayload = null;
+    if (!session) {
+      statelessPayload = decodeStatelessSessionToken(sessionToken);
+      if (statelessPayload) {
+        const ageSeconds = (Date.now() - statelessPayload.createdAt) / 1e3;
+        if (ageSeconds > env.SESSION_TTL_SECONDS) {
+          throw new SessionExpiredError();
+        }
+        const cookieJar = new CookieJar();
+        if (statelessPayload.phpsessid) {
+          cookieJar.setCookieSync(
+            `PHPSESSID=${statelessPayload.phpsessid}; Path=/; Domain=imsnsit.org`,
+            env.PLUMWARE_BASE_URL
+          );
+        }
+        session = {
+          sessionToken,
+          cookieJar,
+          f: statelessPayload.f,
+          encFy: statelessPayload.enc_fy,
+          fy: statelessPayload.fy,
+          comp: statelessPayload.comp,
+          t: statelessPayload.t,
+          hrandNum: statelessPayload.HRAND_NUM,
+          createdAt: statelessPayload.createdAt,
+          expiresAt: statelessPayload.createdAt + env.SESSION_TTL_SECONDS * 1e3,
+          isAuthenticated: false
+        };
+      }
+    }
     if (!session) {
       throw new SessionExpiredError();
     }
-    logger.info("AUTH", `Refreshing CAPTCHA challenge for session ${sessionToken.slice(0, 8)}...`);
+    logger.info("AUTH", `Refreshing CAPTCHA challenge for session ${sessionToken.slice(0, 10)}...`);
     const scriptText = await this.httpClient.refreshCaptchaScript(session.cookieJar);
     const { captchaPath } = PlumwareHtmlParser.parseCaptchaRefreshScript(scriptText);
     const captchaBuffer = await this.httpClient.fetchCaptchaBuffer(session.cookieJar, captchaPath);
@@ -2807,9 +2959,41 @@ var SessionEngineService = class {
   }
   /**
    * Verifies credentials against the legacy Plumware portal using the session's bound cookie jar.
+   * Transparently rehydrates from stateless token when cross-lambda routing causes memory store misses.
    */
   async authenticate(payload) {
-    const session = await this.sessionStore.get(payload.sessionToken);
+    let session = await this.sessionStore.get(payload.sessionToken);
+    let statelessPayload = null;
+    if (!session) {
+      statelessPayload = decodeStatelessSessionToken(payload.sessionToken);
+      if (statelessPayload) {
+        const ageSeconds = (Date.now() - statelessPayload.createdAt) / 1e3;
+        if (ageSeconds > env.SESSION_TTL_SECONDS) {
+          throw new SessionExpiredError("Session expired after 180s. Please acquire a fresh session.");
+        }
+        const reconstructedJar = new CookieJar();
+        if (statelessPayload.phpsessid) {
+          reconstructedJar.setCookieSync(
+            `PHPSESSID=${statelessPayload.phpsessid}; Path=/; Domain=imsnsit.org`,
+            env.PLUMWARE_BASE_URL
+          );
+        }
+        session = {
+          sessionToken: payload.sessionToken,
+          cookieJar: reconstructedJar,
+          f: statelessPayload.f,
+          encFy: statelessPayload.enc_fy,
+          fy: statelessPayload.fy,
+          comp: statelessPayload.comp,
+          t: statelessPayload.t,
+          hrandNum: statelessPayload.HRAND_NUM,
+          createdAt: statelessPayload.createdAt,
+          expiresAt: statelessPayload.createdAt + env.SESSION_TTL_SECONDS * 1e3,
+          isAuthenticated: false,
+          captchaPath: "stateless_active"
+        };
+      }
+    }
     if (!session) {
       throw new SessionExpiredError();
     }
@@ -2824,71 +3008,98 @@ var SessionEngineService = class {
     await this.sessionStore.update(payload.sessionToken, {
       captchaPath: void 0
     });
+    const cleanRoll = payload.rollNo.trim().toUpperCase();
+    const cleanPwd = payload.password;
+    const cleanCap = payload.captchaText.trim();
     logger.info(
       "AUTH",
-      `Submitting authentication handshake for Roll: ${payload.rollNo} (Session: ${session.sessionToken.slice(0, 8)}...)`
+      `Submitting authentication handshake for Roll: ${cleanRoll} (Session: ${session.sessionToken.slice(0, 10)}...)`
     );
-    const formPayload = {
-      uid: payload.rollNo,
-      user_id: payload.rollNo,
-      pwd: payload.password,
-      password: payload.password,
-      cap: payload.captchaText,
-      security_code: payload.captchaText,
-      f: session.f || "",
+    const formParams = new URLSearchParams({
+      uid: cleanRoll,
+      pwd: cleanPwd,
+      cap: cleanCap,
       enc_fy: session.encFy || "",
-      fy: session.fy,
-      comp: session.comp || "NETAJI SUBHAS UNIVERSITY OF TECHNOLOGY",
-      t: session.t || "swx",
       HRAND_NUM: session.hrandNum || "",
-      login: "Login",
-      Submit: "Login"
-    };
+      comp: session.comp || "NETAJI SUBHAS UNIVERSITY OF TECHNOLOGY",
+      fy: session.fy || "2026-27",
+      t: session.t || "swx",
+      f: session.f || "",
+      login: "Login"
+    });
+    let phpsessid = statelessPayload?.phpsessid || "";
+    if (!phpsessid) {
+      try {
+        const cookies = await session.cookieJar.getCookies(env.PLUMWARE_BASE_URL);
+        const found = cookies.find((c) => c.key.toLowerCase() === "phpsessid");
+        if (found) phpsessid = found.value;
+      } catch {
+      }
+    }
     let html;
     let statusCode;
     let location;
     try {
-      const res = await this.httpClient.submitLogin(session.cookieJar, formPayload);
+      const res = await this.httpClient.submitLogin(session.cookieJar, formParams, phpsessid);
       html = res.html;
       statusCode = res.statusCode;
       location = res.location;
     } catch (err) {
-      await this.sessionStore.delete(payload.sessionToken);
+      await this.sessionStore.update(payload.sessionToken, { captchaPath: void 0 });
       throw err;
     }
     const outcome = PlumwareHtmlParser.classifyLoginResponse(html, statusCode, location);
     logger.debug("AUTH", `Plumware login outcome classification: ${outcome.type}`);
     switch (outcome.type) {
       case "INVALID_CAPTCHA":
-        await this.sessionStore.delete(payload.sessionToken);
+        await this.sessionStore.update(payload.sessionToken, { captchaPath: void 0 });
         throw new InvalidCaptchaError(outcome.reason);
       case "INVALID_CREDENTIALS":
-        await this.sessionStore.delete(payload.sessionToken);
+        await this.sessionStore.update(payload.sessionToken, { captchaPath: void 0 });
         throw new InvalidCredentialsError(outcome.reason);
       case "ACCESS_DENIED":
-        await this.sessionStore.delete(payload.sessionToken);
+        await this.sessionStore.update(payload.sessionToken, { captchaPath: void 0 });
         throw new PlumwareTripwireError(outcome.reason, { location });
       case "SUCCESS": {
         const authenticatedAt = Date.now();
         const cookies = await session.cookieJar.getCookieString(env.PLUMWARE_BASE_URL);
+        const activePhpsessid = phpsessid || (cookies.match(/PHPSESSID=([^;]+)/i)?.[1] || "");
+        const authPayload = {
+          type: "authenticated",
+          rollNo: cleanRoll,
+          phpsessid: activePhpsessid,
+          academicYear: session.fy,
+          createdAt: authenticatedAt,
+          expiresAt: authenticatedAt + env.SESSION_TTL_SECONDS * 1e3
+        };
+        const authenticatedToken = encodeAuthenticatedToken(authPayload);
         await this.sessionStore.update(payload.sessionToken, {
           isAuthenticated: true,
-          rollNo: payload.rollNo,
+          rollNo: cleanRoll,
           serializedCookies: cookies,
-          f: void 0,
-          encFy: void 0,
-          comp: void 0,
-          t: void 0,
-          hrandNum: void 0,
           captchaPath: void 0
         });
+        await this.sessionStore.set(
+          authenticatedToken,
+          {
+            isAuthenticated: true,
+            sessionToken: authenticatedToken,
+            cookieJar: session.cookieJar,
+            rollNo: cleanRoll,
+            fy: session.fy,
+            serializedCookies: cookies,
+            createdAt: authenticatedAt,
+            expiresAt: authenticatedAt + env.SESSION_TTL_SECONDS * 1e3
+          },
+          env.SESSION_TTL_SECONDS
+        );
         logger.info(
           "AUTH",
-          `Handshake SUCCESS for Roll: ${payload.rollNo}. Authenticated session established.`
+          `Handshake SUCCESS for Roll: ${cleanRoll}. Authenticated session established.`
         );
         return {
-          sessionToken: payload.sessionToken,
-          rollNo: payload.rollNo,
+          sessionToken: authenticatedToken,
+          rollNo: cleanRoll,
           academicYear: session.fy,
           authenticatedAt,
           message: "Authentication successful. Upstream ERP session established."
@@ -2906,13 +3117,36 @@ var SessionEngineService = class {
   }
   /**
    * Retrieves an active session state if authenticated.
+   * Decodes stateless authenticated tokens if container memory misses.
    */
   async getAuthenticatedSession(sessionToken) {
     const session = await this.sessionStore.get(sessionToken);
-    if (!session || !session.isAuthenticated) {
-      throw new SessionExpiredError("Authenticated session has expired or is invalid.");
+    if (session && session.isAuthenticated) {
+      return session;
     }
-    return session;
+    const authPayload = decodeAuthenticatedToken(sessionToken);
+    if (authPayload) {
+      if (Date.now() > authPayload.expiresAt) {
+        throw new SessionExpiredError("Authenticated session has expired. Please log in again.");
+      }
+      const reconstructedJar = new CookieJar();
+      if (authPayload.phpsessid) {
+        reconstructedJar.setCookieSync(
+          `PHPSESSID=${authPayload.phpsessid}; Path=/; Domain=imsnsit.org`,
+          env.PLUMWARE_BASE_URL
+        );
+      }
+      return {
+        sessionToken,
+        cookieJar: reconstructedJar,
+        rollNo: authPayload.rollNo,
+        fy: authPayload.academicYear,
+        createdAt: authPayload.createdAt,
+        expiresAt: authPayload.expiresAt,
+        isAuthenticated: true
+      };
+    }
+    throw new SessionExpiredError("Authenticated session has expired or is invalid.");
   }
 };
 

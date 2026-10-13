@@ -17,7 +17,8 @@ export class ApiError extends Error {
   constructor(
     public readonly code: string,
     message: string,
-    public readonly details?: Record<string, unknown>
+    public readonly details?: Record<string, unknown>,
+    public readonly status?: number
   ) {
     super(message);
     this.name = 'ApiError';
@@ -44,14 +45,17 @@ async function handleResponse<T>(response: Response): Promise<T> {
         statusText: response.statusText,
         contentType: response.headers.get('content-type') || 'unknown',
         url: response.url,
-      }
+      },
+      response.status
     );
   }
 
   if (!json) {
     throw new ApiError(
       `HTTP_${response.status}`,
-      `Gateway error (HTTP ${response.status} ${response.statusText || 'Error'}). Upstream gateway returned empty JSON payload.`
+      `Gateway error (HTTP ${response.status} ${response.statusText || 'Error'}). Upstream gateway returned empty JSON payload.`,
+      undefined,
+      response.status
     );
   }
 
@@ -59,7 +63,8 @@ async function handleResponse<T>(response: Response): Promise<T> {
     throw new ApiError(
       json.code || json.error || `HTTP_${response.status}`,
       json.message || 'An unexpected telemetry gateway error occurred.',
-      json.details
+      json.details,
+      response.status
     );
   }
 
