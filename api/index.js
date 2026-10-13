@@ -1464,15 +1464,37 @@ var SessionTokenSchema = z2.string().min(10, { message: "Session token format in
   (val) => verifySessionTokenSignature(val),
   { message: "Invalid session token signature or unauthorized format." }
 );
-var LoginPayloadSchema = z2.object({
-  sessionToken: SessionTokenSchema,
-  rollNo: z2.string().min(3, { message: "Roll number must be at least 3 characters." }).max(30, { message: "Roll number cannot exceed 30 characters." }).transform((val) => val.trim().toUpperCase()),
-  password: z2.string().min(1, { message: "Password is required." }),
-  captchaText: z2.string().min(1, { message: "CAPTCHA security code is required." }).max(10, { message: "CAPTCHA security code cannot exceed 10 characters." }).transform((val) => val.trim())
-});
-var RefreshCaptchaSchema = z2.object({
-  sessionToken: SessionTokenSchema
-});
+var LoginPayloadSchema = z2.preprocess(
+  (arg) => {
+    if (typeof arg !== "object" || arg === null) return arg;
+    const obj = arg;
+    return {
+      ...obj,
+      sessionToken: obj.sessionToken ?? obj.session_token,
+      rollNo: obj.rollNo ?? obj.roll_no,
+      captchaText: obj.captchaText ?? obj.captcha_text
+    };
+  },
+  z2.object({
+    sessionToken: SessionTokenSchema,
+    rollNo: z2.string().min(3, { message: "Roll number must be at least 3 characters." }).max(30, { message: "Roll number cannot exceed 30 characters." }).transform((val) => val.trim().toUpperCase()),
+    password: z2.string().min(1, { message: "Password is required." }),
+    captchaText: z2.string().min(1, { message: "CAPTCHA security code is required." }).max(10, { message: "CAPTCHA security code cannot exceed 10 characters." }).transform((val) => val.trim())
+  })
+);
+var RefreshCaptchaSchema = z2.preprocess(
+  (arg) => {
+    if (typeof arg !== "object" || arg === null) return arg;
+    const obj = arg;
+    return {
+      ...obj,
+      sessionToken: obj.sessionToken ?? obj.session_token
+    };
+  },
+  z2.object({
+    sessionToken: SessionTokenSchema
+  })
+);
 
 // src/routes/auth.routes.ts
 function createAuthRouter(authController) {

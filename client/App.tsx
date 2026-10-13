@@ -13,7 +13,6 @@ import type {
   LoginSuccessData,
 } from './types/api';
 import { RefreshCw, Zap } from 'lucide-react';
-import { BuildTallySidebar } from './components/BuildTallySidebar';
 
 export const App: React.FC = () => {
   const [sessionToken, setSessionToken] = useState<string | null>(() => {
@@ -24,7 +23,9 @@ export const App: React.FC = () => {
   });
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
-  const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
+  const [showLoginModal, setShowLoginModal] = useState<boolean>(() => {
+    return !localStorage.getItem('ns_cognito_session_token');
+  });
   const [profile, setProfile] = useState<StudentAcademicProfile | null>(null);
   const [schedule, setSchedule] = useState<PersonalizedStudentSchedule | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -106,6 +107,7 @@ export const App: React.FC = () => {
     localStorage.setItem('ns_cognito_session_token', loginData.sessionToken);
     localStorage.setItem('ns_cognito_roll_no', loginData.rollNo);
     setShowLoginModal(false);
+    setActiveTab('dashboard');
     loadTelemetryData(loginData.sessionToken);
   };
 
@@ -114,9 +116,10 @@ export const App: React.FC = () => {
     setRollNo(null);
     localStorage.removeItem('ns_cognito_session_token');
     localStorage.removeItem('ns_cognito_roll_no');
-    setProfile(MOCK_STUDENT_PROFILE);
-    setSchedule(MOCK_STUDENT_SCHEDULE);
-    setIsDemoMode(true);
+    setProfile(null);
+    setSchedule(null);
+    setIsDemoMode(false);
+    setShowLoginModal(true);
   };
 
   const handleEnableLiveMode = () => {
@@ -274,9 +277,6 @@ export const App: React.FC = () => {
           </div>
         </div>
       </footer>
-
-      {/* Running Build & Telemetry Tally on the side */}
-      <BuildTallySidebar />
     </div>
   );
 };

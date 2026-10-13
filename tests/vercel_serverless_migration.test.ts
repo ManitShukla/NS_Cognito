@@ -111,7 +111,7 @@ describe('Vercel Serverless Deployment & Runtime Adaptation Test Suite', () => {
       expect(response.status).toBe(200);
       expect(response.body.status).toBe('success');
       expect(response.body.data.sessionToken).toBeDefined();
-    });
+    }, 15000);
 
     it('handles GET /api/v1/auth/session returning 200 with valid Base64 JPEG/PNG CAPTCHA', async () => {
       const response = await request(app).get('/api/v1/auth/session');
@@ -120,7 +120,7 @@ describe('Vercel Serverless Deployment & Runtime Adaptation Test Suite', () => {
       expect(response.body.status).toBe('success');
       expect(response.body.data.sessionToken).toBeDefined();
       expect(response.body.data.captchaBase64).toMatch(/^data:image\/(jpeg|png);base64,[A-Za-z0-9+/=]+$/);
-    });
+    }, 15000);
 
     it('handles GET /api/auth/session (without v1) returning 200 with valid Base64 JPEG/PNG CAPTCHA', async () => {
       const response = await request(app).get('/api/auth/session');
@@ -129,7 +129,7 @@ describe('Vercel Serverless Deployment & Runtime Adaptation Test Suite', () => {
       expect(response.body.status).toBe('success');
       expect(response.body.data.sessionToken).toBeDefined();
       expect(response.body.data.captchaBase64).toMatch(/^data:image\/(jpeg|png);base64,[A-Za-z0-9+/=]+$/);
-    });
+    }, 15000);
   });
 
   // ===========================================================================

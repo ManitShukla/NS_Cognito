@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiClient, ApiError } from '../api/client';
-import { RefreshCw, Lock, User, KeyRound, AlertTriangle, ArrowRight, ShieldCheck, Clock, Download } from 'lucide-react';
+import { RefreshCw, Lock, User, KeyRound, AlertTriangle, ShieldCheck, Clock } from 'lucide-react';
 import type { SessionInitData, LoginSuccessData } from '../types/api';
 
 interface LoginPageProps {
@@ -16,24 +16,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onCancel }
   const [ttlSeconds, setTtlSeconds] = useState(180);
   const [isLoadingSession, setIsLoadingSession] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<{ code: string; message: string; rawBody?: string } | null>(null);
-  const [showRawPayload, setShowRawPayload] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<{ code: string; message: string } | null>(null);
 
-  const handleDownloadRawPayload = () => {
-    if (!errorMessage?.rawBody) return;
-    const blob = new Blob([errorMessage.rawBody], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `gateway_payload_${Date.now()}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  // Initialize session and fetch CAPTCHA
-  const initHandshake = useCallback(async () => {
+  // Initialize session and fetch fresh CAPTCHA challenge
+  const initHandshake = useCallback(async (): Promise<SessionInitData | null> => {
     setIsLoadingSession(true);
     setErrorMessage(null);
     try {
@@ -41,12 +27,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onCancel }
       setSessionData(data);
       setTtlSeconds(data.expiresInSeconds || 180);
       setCaptchaText('');
+      return data;
     } catch (err) {
       if (err instanceof ApiError) {
         setErrorMessage({
           code: err.code,
           message: err.message,
-          rawBody: typeof err.details?.rawBody === 'string' ? err.details.rawBody : undefined,
         });
       } else {
         const msg = err instanceof Error ? err.message : 'Unable to establish secure handshake with Plumware proxy gateway.';
@@ -55,6 +41,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onCancel }
           message: msg,
         });
       }
+      return null;
     } finally {
       setIsLoadingSession(false);
     }
@@ -74,7 +61,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onCancel }
       setTtlSeconds(refreshed.expiresInSeconds || 180);
       setCaptchaText('');
     } catch {
-      // If refresh fails due to session expiration, re-initialize
+      // If refresh fails due to session expiration, re-initialize whole handshake
       await initHandshake();
     } finally {
       setIsLoadingSession(false);
@@ -109,49 +96,101 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onCancel }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!sessionData?.sessionToken) {
-      setErrorMessage({ code: 'SESSION_MISSING', message: 'Session handshake not initialized.' });
+
+    // 1. Roll Number Validation
+    const cleanRoll = rollNo.trim().toUpperCase();
+    if (!cleanRoll) {
+      setErrorMessage({
+        code: 'NOTICE // ENTER_ALL_CREDENTIALS',
+        message: 'Roll Number is required to initialize academic session.',
+      });
       return;
     }
 
-    if (!rollNo.trim()) {
-      setErrorMessage({ code: 'VALIDATION_ERROR', message: 'Roll Number is required.' });
-      return;
-    }
+    // 2. Password Validation
     if (!password) {
-      setErrorMessage({ code: 'VALIDATION_ERROR', message: 'Password is required.' });
+      setErrorMessage({
+        code: 'NOTICE // ENTER_ALL_CREDENTIALS',
+        message: 'ERP Password is required to authenticate with Plumware.',
+      });
       return;
     }
-    if (!captchaText.trim()) {
-      setErrorMessage({ code: 'VALIDATION_ERROR', message: 'CAPTCHA security code is required.' });
+
+    // 3. CAPTCHA Security Code Validation
+    const cleanCaptcha = captchaText.trim();
+    if (!cleanCaptcha) {
+      setErrorMessage({
+        code: 'NOTICE // ENTER_ALL_CREDENTIALS',
+        message: 'Please enter the CAPTCHA security code shown in the challenge frame.',
+      });
       return;
     }
 
     setIsSubmitting(true);
     setErrorMessage(null);
 
+    // 4. Ensure session token is present; if missing/null, prime fresh session first
+    let activeToken = sessionData?.sessionToken;
+    if (!activeToken) {
+      const freshSession = await initHandshake();
+      if (!freshSession?.sessionToken) {
+        setIsSubmitting(false);
+        setErrorMessage({
+          code: 'HANDSHAKE_ERROR',
+          message: 'Unable to establish secure handshake with Plumware gateway. Please retry.',
+        });
+        return;
+      }
+      activeToken = freshSession.sessionToken;
+    }
+
     try {
       const loginData = await apiClient.login({
-        sessionToken: sessionData.sessionToken,
-        rollNo: rollNo.trim().toUpperCase(),
+        sessionToken: activeToken,
+        rollNo: cleanRoll,
         password,
-        captchaText: captchaText.trim(),
+        captchaText: cleanCaptcha,
       });
+
+      // Clear password field on successful dispatch
+      setPassword('');
+      setCaptchaText('');
+
+      // Immediately route to dashboard
       onLoginSuccess(loginData);
-    } catch (err) {
+    } catch (err: unknown) {
+      // Map domain rejections to structured, readable user feedback
       if (err instanceof ApiError) {
-        setErrorMessage({
-          code: err.code,
-          message: err.message,
-          rawBody: typeof err.details?.rawBody === 'string' ? err.details.rawBody : undefined,
-        });
+        if (err.code === 'INVALID_CAPTCHA') {
+          setErrorMessage({
+            code: 'INVALID_CAPTCHA',
+            message: 'Security code mismatch. Refreshing challenge...',
+          });
+        } else if (err.code === 'INVALID_CREDENTIALS') {
+          setErrorMessage({
+            code: 'INVALID_CREDENTIALS',
+            message: 'University portal rejected Roll Number or Password.',
+          });
+        } else if (err.code === 'UPSTREAM_TIMEOUT' || err.code === 'GATEWAY_TIMEOUT') {
+          setErrorMessage({
+            code: 'GATEWAY_TIMEOUT',
+            message: 'Upstream university portal is unresponsive. Please retry.',
+          });
+        } else {
+          setErrorMessage({
+            code: err.code || 'AUTH_GATEWAY_ERROR',
+            message: err.message || 'Authentication rejected by Plumware gateway.',
+          });
+        }
       } else {
+        const fallbackMsg = err instanceof Error ? err.message : 'Authentication failed due to upstream proxy or network error.';
         setErrorMessage({
           code: 'AUTH_GATEWAY_ERROR',
-          message: 'Authentication failed due to upstream proxy or network error.',
+          message: fallbackMsg,
         });
       }
-      // Clear CAPTCHA text and reload challenge, keeping rollNo and password intact
+
+      // Automatically refresh CAPTCHA challenge after rejection
       setCaptchaText('');
       handleRefreshCaptcha();
     } finally {
@@ -164,13 +203,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onCancel }
     const mins = Math.floor(sec / 60);
     const s = sec % 60;
     return `${mins.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
-
-  // Demo auto-fill helper
-  const handleLoadDemo = () => {
-    setRollNo('2024UCB1234');
-    setPassword('••••••••••••');
-    setCaptchaText('NSUT26');
   };
 
   return (
@@ -227,32 +259,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onCancel }
                 <span>{errorMessage.message}</span>
               </div>
             </div>
-
-            {errorMessage.rawBody && (
-              <div className="pt-2 border-t border-red-900/60 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleDownloadRawPayload}
-                  className="px-2.5 py-1 bg-co-red hover:bg-red-700 text-white font-mono text-[10px] font-bold uppercase tracking-wider flex items-center space-x-1 cursor-pointer transition-colors"
-                >
-                  <Download className="w-3 h-3" />
-                  <span>DOWNLOAD RAW PAYLOAD (.TXT)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowRawPayload(!showRawPayload)}
-                  className="px-2 py-1 bg-co-night border border-co-dark-rule text-co-dark-copy hover:text-white font-mono text-[10px] uppercase cursor-pointer"
-                >
-                  {showRawPayload ? 'HIDE RAW PAYLOAD' : 'INSPECT RAW PAYLOAD'}
-                </button>
-              </div>
-            )}
-
-            {showRawPayload && errorMessage.rawBody && (
-              <pre className="mt-2 p-2 bg-black/90 border border-co-dark-rule text-[10px] font-mono text-zinc-300 max-h-40 overflow-y-auto whitespace-pre-wrap break-all select-all">
-                {errorMessage.rawBody}
-              </pre>
-            )}
           </div>
         )}
 
@@ -358,25 +364,22 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onCancel }
           <div className="pt-2">
             <button
               type="submit"
-              disabled={isSubmitting || isLoadingSession}
-              className="w-full py-3.5 bg-co-red border border-co-red text-white font-sans font-bold text-sm tracking-wider uppercase flex items-center justify-center space-x-2 hover:-translate-y-0.5 transition-transform cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
+              disabled={isSubmitting}
+              className="w-full py-3.5 bg-co-red border border-co-red text-white font-sans font-bold text-sm tracking-wider uppercase flex items-center justify-center space-x-2 hover:-translate-y-0.5 transition-transform cursor-pointer disabled:opacity-60"
             >
               {isSubmitting ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>NEGOTIATING_SESSION_TOKEN...</span>
+                  <span>AUTHENTICATING :: VERIFYING_PORTAL_SESSION...</span>
                 </>
               ) : (
-                <>
-                  <span>INITIALIZE ACADEMIC SESSION</span>
-                  <ArrowRight className="w-4 h-4" />
-                </>
+                <span>INITIALIZE ACADEMIC SESSION →</span>
               )}
             </button>
           </div>
         </form>
 
-        {/* Footer Audit Stamp & Quick Auto-fill */}
+        {/* Footer Audit Stamp & System Indicators */}
         <div className="mt-8 pt-4 border-t border-co-dark-rule flex flex-col sm:flex-row items-center justify-between text-co-muted font-mono text-[11px] space-y-2 sm:space-y-0">
           <div className="flex items-center space-x-1.5">
             <ShieldCheck className="w-3.5 h-3.5 text-co-blue" />
@@ -384,18 +387,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onCancel }
           </div>
 
           <div className="flex items-center space-x-3">
-            <button
-              type="button"
-              onClick={handleLoadDemo}
-              className="text-co-dark-copy hover:text-white underline cursor-pointer"
-            >
-              PRESET_DEMO_CREDENTIALS
-            </button>
+            <span className="text-co-dark-copy uppercase">
+              MODE // REALTIME_DIRECT_PIPELINE
+            </span>
             {onCancel && (
               <button
                 type="button"
                 onClick={onCancel}
-                className="text-co-muted hover:text-white cursor-pointer"
+                className="text-co-muted hover:text-white cursor-pointer underline"
               >
                 RETURN_TO_VIEW
               </button>
